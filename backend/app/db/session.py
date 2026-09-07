@@ -4,7 +4,6 @@ from ..core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,
     pool_recycle=3600,
 )
 

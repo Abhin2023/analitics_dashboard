@@ -13,7 +13,11 @@ from app.models.models import (
     Role, Permission, RolePermission, User, UserStoreAccess,
     Store, Currency, KPIWeight, IncentiveBand, Setting,
 )
-from app.instagram.models import AIProvider
+from app.instagram.models import (
+    AIProvider, IGAccount, IGConversation, IGMessage,
+    IGComment, IGCommentRule, AIUsageLog, IGFAQ, IGBotSettings,
+)
+from app.instagram.form_models import IGForm, IGFormField, IGFormSubmission
 from sqlalchemy import select
 
 RESOURCES = [
