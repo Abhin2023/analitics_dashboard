@@ -147,9 +147,49 @@ INCENTIVE_BANDS = [
 ]
 
 
+async def ensure_sheet_assignments():
+    """Create TeleSheetAssignment records if missing. Runs even if already seeded."""
+    SHEET_ASSIGNMENTS = [
+        ("sanjay@breakprotection.com", "Kerala"),
+        ("nazil.tele@breakprotection.com", "Bangalore"),
+        ("nirmala@breakprotection.com", "Delhi"),
+        ("sam.tele@breakprotection.com", "Chennai"),
+        ("ekbal@breakprotection.com", "Guwahati"),
+        ("guwahati@breakprotection.com", "Guwahati"),
+        ("delhi@breakprotection.com", "Delhi"),
+        ("kerala@breakprotection.com", "Kerala"),
+        ("chennai@breakprotection.com", "Chennai"),
+        ("mumbai@breakprotection.com", "Bangalore"),
+    ]
+    async with AsyncSessionLocal() as db:
+        assignment_count = 0
+        for email, sheet_name in SHEET_ASSIGNMENTS:
+            result = await db.execute(select(User).where(User.email == email))
+            target_user = result.scalar_one_or_none()
+            if not target_user:
+                continue
+            result = await db.execute(
+                select(TeleSheetAssignment).where(
+                    TeleSheetAssignment.user_id == target_user.id,
+                    TeleSheetAssignment.sheet_tl_name == sheet_name,
+                )
+            )
+            if result.scalar_one_or_none():
+                continue
+            db.add(TeleSheetAssignment(user_id=target_user.id, sheet_tl_name=sheet_name))
+            assignment_count += 1
+        if assignment_count:
+            await db.commit()
+            print(f"  Created {assignment_count} sheet assignments")
+        else:
+            print("  Sheet assignments already up to date")
+
+
 async def seed():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    await ensure_sheet_assignments()
 
     async with AsyncSessionLocal() as db:
         # Check if already seeded
@@ -306,41 +346,6 @@ async def seed():
             await db.flush()
             tc_users[tc_name] = user
         print(f"  Created {len(tc_users)} Telecallers")
-
-        # 6d. Tele Sheet Assignments (user → city sheet mapping)
-        SHEET_ASSIGNMENTS = [
-            # Telecallers
-            ("sanjay@breakprotection.com", "Kerala"),
-            ("nazil.tele@breakprotection.com", "Bangalore"),
-            ("nirmala@breakprotection.com", "Delhi"),
-            ("sam.tele@breakprotection.com", "Chennai"),
-            ("ekbal@breakprotection.com", "Guwahati"),
-            # City-based Team Leaders
-            ("guwahati@breakprotection.com", "Guwahati"),
-            ("delhi@breakprotection.com", "Delhi"),
-            ("kerala@breakprotection.com", "Kerala"),
-            ("chennai@breakprotection.com", "Chennai"),
-            ("mumbai@breakprotection.com", "Bangalore"),
-        ]
-        assignment_count = 0
-        for email, sheet_name in SHEET_ASSIGNMENTS:
-            result = await db.execute(select(User).where(User.email == email))
-            target_user = result.scalar_one_or_none()
-            if not target_user:
-                print(f"  Skipping assignment: user {email} not found")
-                continue
-            result = await db.execute(
-                select(TeleSheetAssignment).where(
-                    TeleSheetAssignment.user_id == target_user.id,
-                    TeleSheetAssignment.sheet_tl_name == sheet_name,
-                )
-            )
-            if result.scalar_one_or_none():
-                continue
-            assignment = TeleSheetAssignment(user_id=target_user.id, sheet_tl_name=sheet_name)
-            db.add(assignment)
-            assignment_count += 1
-        print(f"  Created {assignment_count} sheet assignments")
 
         # 7. KPI Weights
         for name, desc, weight in KPI_WEIGHTS:
