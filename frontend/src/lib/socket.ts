@@ -15,7 +15,7 @@ export function getSocket(): Socket {
 
   socket = io(window.location.origin, {
     auth: { token },
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionAttempts: Infinity,
