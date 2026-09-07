@@ -56,7 +56,7 @@ async def _check_lead_access(db: AsyncSession, user, lead: TeleCallLead, role_na
         sheets = await _get_user_sheet_names(db, user)
         return lead.sheet_tl_name in sheets
     if role_name == "Salesperson":
-        return lead.salesperson == user.name
+        return lead.person_calling == user.name
     return False
 
 
@@ -103,7 +103,7 @@ async def get_tele_call_leads(
             return {"tl_groups": {}, "total": 0, "role": role_name, "user_sheets": []}
         query = query.where(TeleCallLead.sheet_tl_name.in_(sheets))
     elif role_name == "Salesperson":
-        query = query.where(TeleCallLead.salesperson == user.name)
+        query = query.where(TeleCallLead.person_calling == user.name)
     else:
         return {"tl_groups": {}, "total": 0, "role": role_name, "user_sheets": []}
 
@@ -209,7 +209,7 @@ async def get_status_summary(
         else:
             return {"summary": {}}
     elif role_name == "Salesperson":
-        query = query.where(TeleCallLead.salesperson == user.name)
+        query = query.where(TeleCallLead.person_calling == user.name)
 
     query = query.group_by(TeleCallLead.sheet_tl_name, TeleCallLead.status)
     rows = await db.execute(query)
