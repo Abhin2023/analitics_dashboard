@@ -15,6 +15,7 @@ export default function RoleDashboard() {
     <Suspense fallback={<div className="p-6"><TableSkeleton /></div>}>
       {role === "Telecaller" && <TelecallerDashboard />}
       {role === "Team Leader" && <TeamLeaderDashboard />}
+      {role === "Salesperson" && <TelecallerDashboard />}
       {ADMIN_ROLES.includes(role || "") && <Dashboard />}
       {!role && <Dashboard />}
     </Suspense>

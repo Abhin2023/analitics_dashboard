@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case
 from ...core.deps import get_db, require_permission
-from ...models.models import Store, User, DailySubmission, Lead, Campaign, Task, Investment, TeleCallLead, TeleSheetAssignment
+from ...models.models import Store, User, DailySubmission, Lead, Campaign, Task, Investment, TeleCallLead, TeleSheetAssignment, Role
 from ...schemas import DashboardResponse, KPICard
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -295,12 +295,23 @@ async def get_telecaller_dashboard(
         select(TeleSheetAssignment.sheet_tl_name).where(TeleSheetAssignment.user_id == user.id)
     )).scalars().all()
 
-    leads = (await db.execute(
-        select(TeleCallLead).where(
-            TeleCallLead.person_calling == user.name,
-            TeleCallLead.sheet_tl_name.in_(assigned_sheets) if assigned_sheets else True,
-        ).order_by(TeleCallLead.created_at.desc())
-    )).scalars().all()
+    role_result = await db.execute(select(Role.name).where(Role.id == user.role_id))
+    role_name = role_result.scalar_one_or_none() or ""
+
+    if role_name == "Salesperson":
+        leads = (await db.execute(
+            select(TeleCallLead).where(
+                TeleCallLead.person_calling == user.name,
+            ).order_by(TeleCallLead.created_at.desc())
+        )).scalars().all()
+    elif assigned_sheets:
+        leads = (await db.execute(
+            select(TeleCallLead).where(
+                TeleCallLead.sheet_tl_name.in_(assigned_sheets),
+            ).order_by(TeleCallLead.created_at.desc())
+        )).scalars().all()
+    else:
+        leads = []
 
     total = len(leads)
     converted = len([l for l in leads if l.status == "Sale Conversion"])

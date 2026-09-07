@@ -11,7 +11,7 @@ from app.db.base import Base
 from app.core.security import hash_password
 from app.models.models import (
     Role, Permission, RolePermission, User, UserStoreAccess,
-    Store, Currency, KPIWeight, IncentiveBand, Setting,
+    Store, Currency, KPIWeight, IncentiveBand, Setting, TeleSheetAssignment,
 )
 from app.instagram.models import (
     AIProvider, IGAccount, IGConversation, IGMessage,
@@ -306,6 +306,41 @@ async def seed():
             await db.flush()
             tc_users[tc_name] = user
         print(f"  Created {len(tc_users)} Telecallers")
+
+        # 6d. Tele Sheet Assignments (user → city sheet mapping)
+        SHEET_ASSIGNMENTS = [
+            # Telecallers
+            ("sanjay@breakprotection.com", "Kerala"),
+            ("nazil.tele@breakprotection.com", "Bangalore"),
+            ("nirmala@breakprotection.com", "Delhi"),
+            ("sam.tele@breakprotection.com", "Chennai"),
+            ("ekbal@breakprotection.com", "Guwahati"),
+            # City-based Team Leaders
+            ("guwahati@breakprotection.com", "Guwahati"),
+            ("delhi@breakprotection.com", "Delhi"),
+            ("kerala@breakprotection.com", "Kerala"),
+            ("chennai@breakprotection.com", "Chennai"),
+            ("mumbai@breakprotection.com", "Bangalore"),
+        ]
+        assignment_count = 0
+        for email, sheet_name in SHEET_ASSIGNMENTS:
+            result = await db.execute(select(User).where(User.email == email))
+            target_user = result.scalar_one_or_none()
+            if not target_user:
+                print(f"  Skipping assignment: user {email} not found")
+                continue
+            result = await db.execute(
+                select(TeleSheetAssignment).where(
+                    TeleSheetAssignment.user_id == target_user.id,
+                    TeleSheetAssignment.sheet_tl_name == sheet_name,
+                )
+            )
+            if result.scalar_one_or_none():
+                continue
+            assignment = TeleSheetAssignment(user_id=target_user.id, sheet_tl_name=sheet_name)
+            db.add(assignment)
+            assignment_count += 1
+        print(f"  Created {assignment_count} sheet assignments")
 
         # 7. KPI Weights
         for name, desc, weight in KPI_WEIGHTS:
