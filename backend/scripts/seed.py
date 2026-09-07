@@ -59,6 +59,14 @@ ROLE_PERMISSIONS = {
         "dashboard": {"view"}, "operations": {"view", "create"},
         "leads": {"view", "create"}, "tasks": {"view"},
     },
+    "Telecaller": {
+        "dashboard": {"view"}, "leads": {"view", "create", "edit"},
+        "operations": {"view"},
+    },
+    "Salesperson": {
+        "dashboard": {"view"}, "leads": {"view", "create", "edit"},
+        "operations": {"view", "create"}, "tasks": {"view", "create"},
+    },
     "Viewer": {
         "dashboard": {"view"}, "operations": {"view"},
         "team_leaders": {"view"}, "leads": {"view"},
@@ -93,6 +101,11 @@ STORES = [
     ("Mysore", "Vishnu", 9167, 275000, "Karnataka"),
     ("Kerala Kottkal", "Harsh", 18333, 550000, "Kerala"),
     ("Kerala Wayanad", "Harsh", 10000, 300000, "Kerala"),
+    ("Guwahati Store", "Guwahati", 15000, 450000, "Assam"),
+    ("Delhi Store", "Delhi", 20000, 600000, "Delhi"),
+    ("Kerala Store", "Kerala", 18000, 540000, "Kerala"),
+    ("Chennai Store", "Chennai", 16667, 500000, "Tamil Nadu"),
+    ("Mumbai Store", "Mumbai", 20000, 600000, "Maharashtra"),
 ]
 
 TL_EMAILS = {
@@ -102,6 +115,11 @@ TL_EMAILS = {
     "Vishnu": "breakprotectionmarathahalli@gmail.com",
     "Abdullah": "breakprotectionhytech@gmail.com",
     "Nazil": "breakprotectionindiranagar@gmail.com",
+    "Guwahati": "guwahati@breakprotection.com",
+    "Delhi": "delhi@breakprotection.com",
+    "Kerala": "kerala@breakprotection.com",
+    "Chennai": "chennai@breakprotection.com",
+    "Mumbai": "mumbai@breakprotection.com",
 }
 
 KPI_WEIGHTS = [
@@ -233,6 +251,57 @@ async def seed():
             db.add(UserStoreAccess(user_id=tl_users[tl_name].id, store_id=store.id))
         await db.flush()
         print(f"  Created {len(store_objs)} stores + TL access links")
+
+        # 6b. Salespersons (1 per city-based TL)
+        salesperson_data = [
+            ("Ravi", "ravi@breakprotection.com", "Guwahati"),
+            ("Amit", "amit@breakprotection.com", "Delhi"),
+            ("Priya", "priya@breakprotection.com", "Kerala"),
+            ("Deepak", "deepak@breakprotection.com", "Chennai"),
+            ("Rohit", "rohit@breakprotection.com", "Mumbai"),
+        ]
+        sp_role = role_objs["Salesperson"]
+        sp_users = {}
+        for sp_name, sp_email, sp_tl in salesperson_data:
+            user = User(
+                name=sp_name,
+                email=sp_email,
+                password_hash=hash_password(f"{sp_name.lower()}123"),
+                role_id=sp_role.id,
+                is_active=True,
+            )
+            db.add(user)
+            await db.flush()
+            sp_users[sp_name] = user
+            # Grant access to their TL's store
+            store_name = f"{sp_tl} Store"
+            if store_name in store_objs:
+                db.add(UserStoreAccess(user_id=user.id, store_id=store_objs[store_name].id))
+        await db.flush()
+        print(f"  Created {len(sp_users)} Salespersons")
+
+        # 6c. Telecallers
+        telecaller_data = [
+            ("SANJAY", "sanjay@breakprotection.com"),
+            ("Nazil Tele", "nazil.tele@breakprotection.com"),
+            ("Nirmala", "nirmala@breakprotection.com"),
+            ("SAM Tele", "sam.tele@breakprotection.com"),
+            ("Ekbal", "ekbal@breakprotection.com"),
+        ]
+        tc_role = role_objs["Telecaller"]
+        tc_users = {}
+        for tc_name, tc_email in telecaller_data:
+            user = User(
+                name=tc_name,
+                email=tc_email,
+                password_hash=hash_password(f"{tc_name.split()[0].lower()}123"),
+                role_id=tc_role.id,
+                is_active=True,
+            )
+            db.add(user)
+            await db.flush()
+            tc_users[tc_name] = user
+        print(f"  Created {len(tc_users)} Telecallers")
 
         # 7. KPI Weights
         for name, desc, weight in KPI_WEIGHTS:

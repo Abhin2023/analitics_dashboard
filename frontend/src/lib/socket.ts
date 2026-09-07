@@ -21,10 +21,6 @@ export function getSocket(): Socket {
     reconnectionAttempts: Infinity,
   });
 
-  socket.on("connect", () => console.log("[Socket] Connected:", socket?.id));
-  socket.on("disconnect", (reason) => console.log("[Socket] Disconnected:", reason));
-  socket.on("connect_error", (err) => console.warn("[Socket] Error:", err.message));
-
   return socket;
 }
 

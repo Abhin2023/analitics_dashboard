@@ -25,6 +25,7 @@ class IGAccount(Base):
     comment_rules = relationship("IGCommentRule", back_populates="ig_account", cascade="all, delete-orphan")
     bot_settings = relationship("IGBotSettings", back_populates="ig_account", uselist=False, cascade="all, delete-orphan")
     comments = relationship("IGComment", back_populates="ig_account", cascade="all, delete-orphan")
+    faqs = relationship("IGFAQ", back_populates="ig_account", cascade="all, delete-orphan")
 
 
 class IGConversation(Base):
@@ -133,6 +134,25 @@ class AIUsageLog(Base):
     ai_provider = relationship("AIProvider", back_populates="usage_logs")
     ig_account = relationship("IGAccount")
     conversation = relationship("IGConversation")
+
+
+class IGFAQ(Base):
+    __tablename__ = "ig_faqs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ig_account_id = Column(Integer, ForeignKey("ig_accounts.id", ondelete="CASCADE"), nullable=False)
+    question = Column(String(500), nullable=False)
+    answer = Column(Text, nullable=False)
+    keywords = Column(JSON, default=list)
+    is_active = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    ig_account = relationship("IGAccount", back_populates="faqs")
+
+    __table_args__ = (
+        Index("ix_ig_faq_account_active", "ig_account_id", "is_active"),
+    )
 
 
 class IGBotSettings(Base):

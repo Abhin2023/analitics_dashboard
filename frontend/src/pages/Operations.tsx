@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuthStore } from "@/lib/authStore";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AISummary } from "@/components/dashboard/AISummary";
-import { BarChart3, Calendar, Filter, ShoppingCart, Store } from "lucide-react";
+import { BarChart3, Calendar, Filter, Loader2, ShoppingCart, Store } from "lucide-react";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 
 import { useSocketRefresh } from "../hooks/useSocketRefresh";
@@ -21,12 +21,14 @@ export default function Operations() {
   const { token } = useAuthStore();
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
   const [tlFilter, setTlFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
 
   const fetchSheets = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
         headers: { Authorization: `Bearer ${token}` },
@@ -34,8 +36,12 @@ export default function Operations() {
       if (res.ok) {
         const d = await res.json();
         if (!d.error) setSheetsData(d);
+      } else {
+        setError("Failed to load operations data");
       }
-    } catch {}
+    } catch {
+      setError("Failed to load operations data");
+    }
     setLoading(false);
   }, [token]);
 
@@ -79,6 +85,16 @@ export default function Operations() {
         <AISummary section="operations" title="Operations AI Summary" />
       ) : (
         <div className="space-y-6">
+        {error && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {loading && !error && (
+          <div className="flex items-center gap-2 text-zinc-400 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading operations data...
+          </div>
+        )}
 
         
 

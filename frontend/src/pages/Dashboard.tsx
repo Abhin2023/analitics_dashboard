@@ -6,7 +6,7 @@ import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import {
   DollarSign, Target, TrendingUp, Users, Phone, Briefcase, Award, AlertTriangle, PieChart as PieIcon, BarChart3,
-  Globe, Video, MessageCircle, Star, Eye, LayoutDashboard, FileText
+  Globe, Video, MessageCircle, Star, Eye, Package, Filter, MapPin, Store
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -15,6 +15,12 @@ import {
 } from "recharts";
 import { useSocketRefresh } from "../hooks/useSocketRefresh";
 import { AISummary } from "@/components/dashboard/AISummary";
+import {
+  CardFilterPopover,
+  CardFilterState,
+  DEFAULT_CARD_FILTER,
+  applyCardFilter,
+} from "@/components/shared/CardFilterPopover";
 
 const BranchGlobe = lazy(() => import("@/components/dashboard/BranchGlobe"));
 
@@ -91,9 +97,23 @@ export default function Dashboard() {
   const { token } = useAuthStore();
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [sheetsLoading, setSheetsLoading] = useState(true);
+  const [sheetsError, setSheetsError] = useState("");
+  const [trendFilter, setTrendFilter] = useState<CardFilterState>(DEFAULT_CARD_FILTER);
+  const [mcpLiveData, setMcpLiveData] = useState<any[]>([]);
+  const [mcpLiveLoading, setMcpLiveLoading] = useState(false);
+  const [countryData, setCountryData] = useState<any[]>([]);
+  const [countryLoading, setCountryLoading] = useState(false);
+  const [stockData, setStockData] = useState<any[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockCountryId, setStockCountryId] = useState(4);
+  const [stockExpanded, setStockExpanded] = useState<Set<string>>(new Set());
+  const [branchesData, setBranchesData] = useState<any[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesExpanded, setBranchesExpanded] = useState<Set<string>>(new Set());
 
   const fetchSheets = useCallback(async () => {
     setSheetsLoading(true);
+    setSheetsError("");
     try {
       const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
         headers: { Authorization: `Bearer ${token}` },
@@ -101,14 +121,91 @@ export default function Dashboard() {
       if (res.ok) {
         const d = await res.json();
         if (!d.error) setSheetsData(d);
+      } else {
+        setSheetsError("Failed to load dashboard data");
       }
-    } catch {}
+    } catch {
+      setSheetsError("Failed to load dashboard data");
+    }
     setSheetsLoading(false);
   }, [token]);
 
-  useEffect(() => { fetchSheets(); }, [fetchSheets]);
+  const fetchMcpLive = useCallback(async () => {
+    setMcpLiveLoading(true);
+    try {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+      const to = now.toISOString().split("T")[0];
+      const res = await fetch(
+        `/api/v1/mcp/sales/daily?country_id=4&from_date=${from}&to_date=${to}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) setMcpLiveData(await res.json());
+    } catch {}
+    setMcpLiveLoading(false);
+  }, [token]);
 
-  const ops = processOpsData(sheetsData?.ops_data || []);
+  const fetchCountryComparison = useCallback(async () => {
+    setCountryLoading(true);
+    try {
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+      const to = now.toISOString().split("T")[0];
+      const res = await fetch(
+        `/api/v1/mcp/sales/country-comparison?from_date=${from}&to_date=${to}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) setCountryData(await res.json());
+    } catch {}
+    setCountryLoading(false);
+  }, [token]);
+
+  const fetchStock = useCallback(async () => {
+    setStockLoading(true);
+    try {
+      const res = await fetch(
+        `/api/v1/mcp/stock/position?country_id=${stockCountryId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) setStockData(await res.json());
+    } catch {}
+    setStockLoading(false);
+  }, [token, stockCountryId]);
+
+  const fetchBranches = useCallback(async () => {
+    setBranchesLoading(true);
+    try {
+      const res = await fetch("/api/v1/mcp/branches", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setBranchesData(await res.json());
+    } catch {}
+    setBranchesLoading(false);
+  }, [token]);
+
+  useEffect(() => {
+    fetchSheets();
+    fetchMcpLive();
+    fetchCountryComparison();
+    fetchBranches();
+  }, [fetchSheets, fetchMcpLive, fetchCountryComparison, fetchBranches]);
+
+  useEffect(() => {
+    fetchStock();
+  }, [fetchStock]);
+
+  const activeData = sheetsData;
+  const activeLoading = sheetsLoading;
+
+  const ops = processOpsData(activeData?.ops_data || []);
+
+  // Today's live revenue from MCP
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayLiveRevenue = useMemo(() => {
+    return mcpLiveData
+      .filter((r: any) => r.date === todayStr)
+      .reduce((s: number, r: any) => s + (r.revenue || 0), 0);
+  }, [mcpLiveData, todayStr]);
 
   // Derive KPI data from sheets
   const kpiData = useMemo(() => {
@@ -121,7 +218,7 @@ export default function Dashboard() {
 
   // Revenue trend from ops_data grouped by date
   const revenueTrend = useMemo(() => {
-    const opsData = sheetsData?.ops_data || [];
+    const opsData = activeData?.ops_data || [];
     if (!opsData.length) return [];
     const dateMap: Record<string, number> = {};
     for (const r of opsData) {
@@ -132,11 +229,11 @@ export default function Dashboard() {
     return Object.entries(dateMap)
       .map(([date, revenue]) => ({ date, revenue }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [sheetsData]);
+  }, [activeData]);
 
   // Revenue breakdown by TL from ops_data
   const revenueBreakdown = useMemo(() => {
-    const opsData = sheetsData?.ops_data || [];
+    const opsData = activeData?.ops_data || [];
     if (!opsData.length) return [];
     const tlMap: Record<string, number> = {};
     for (const r of opsData) {
@@ -148,7 +245,7 @@ export default function Dashboard() {
       .map(([name, value]) => ({ name, value }))
       .filter((x) => x.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [sheetsData]);
+  }, [activeData]);
 
   // Top team leaders from ops_data
   const topTeamLeaders = useMemo(() => {
@@ -164,7 +261,7 @@ export default function Dashboard() {
 
   // Lead distribution from ops_data
   const leadDistribution = useMemo(() => {
-    const opsData = sheetsData?.ops_data || [];
+    const opsData = activeData?.ops_data || [];
     if (!opsData.length) return [];
     const totalLeads = opsData.reduce((s: number, r: any) => s + (r.new_leads || 0), 0);
     const activeLeads = opsData.reduce((s: number, r: any) => s + (r.active_leads || 0), 0);
@@ -176,11 +273,11 @@ export default function Dashboard() {
       { name: "Calls Made", value: callsMade },
       { name: "Calls Connected", value: callsConnected },
     ];
-  }, [sheetsData]);
+  }, [activeData]);
 
   // Marketing data from daily_tracker (xlsx)
   const marketingData = useMemo(() => {
-    const tracker = sheetsData?.daily_tracker || [];
+    const tracker = activeData?.daily_tracker || [];
     if (!tracker.length) return null;
 
     const storeMap: Record<string, any> = {};
@@ -253,9 +350,9 @@ export default function Dashboard() {
     ];
 
     return { stores, totals, socialByPlatform };
-  }, [sheetsData]);
+  }, [activeData]);
 
-  if (!sheetsLoading && !sheetsData) {
+  if (!activeLoading && !activeData) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-center p-6 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl">
         <AlertTriangle size={36} className="text-rose-400 mb-3" />
@@ -267,7 +364,7 @@ export default function Dashboard() {
 
   const kpiCards = kpiData
     ? [
-        { title: "Total Revenue", value: kpiData.totalRevenue, type: "money" as const, icon: <DollarSign size={20} />, color: "#3b82f6" },
+        { title: "Total Revenue", value: kpiData.totalRevenue, type: "money" as const, icon: <DollarSign size={20} />, color: "#3b82f6", badge: !mcpLiveLoading && todayLiveRevenue > 0 ? `LIVE Today: ₹${fmtINR(todayLiveRevenue).replace("₹", "")}` : null },
         { title: "Total Target", value: kpiData.totalTarget, type: "money" as const, icon: <Target size={20} />, color: "#10b981" },
         { title: "Achievement %", value: kpiData.achievementPct, type: "percent" as const, icon: <TrendingUp size={20} />, color: "#a855f7" },
         { title: "Total Investment", value: 0, type: "money" as const, icon: <Briefcase size={20} />, color: "#f97316" },
@@ -293,9 +390,9 @@ export default function Dashboard() {
           <div className="space-y-6 w-full min-w-0">
             {/* KPI Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 min-w-0">
-              {sheetsLoading
+              {activeLoading
             ? Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} />)
-            : kpiCards.map((card, i) => <StatCard key={i} {...card} />)}
+            : kpiCards.map((card, i) => <StatCard key={i} {...card} enableFilter={true} />)}
         </div>
 
         {ops && (
@@ -309,20 +406,37 @@ export default function Dashboard() {
         {/* Charts Grid: Revenue Trend & Gauge */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-w-0">
           <div className="lg:col-span-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 flex flex-col justify-between min-w-0">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-base font-bold text-white tracking-tight">Revenue vs Target Trend</h3>
-                <p className="text-xs text-[var(--text-muted)]">30-day breakdown of daily revenue logs</p>
+                <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  Revenue vs Target Trend
+                  {trendFilter.dateMode !== "all" && (
+                    <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-medium">
+                      {trendFilter.dateMode === "3day"
+                        ? "Last 3 Days"
+                        : trendFilter.dateMode === "7day"
+                        ? "Last 7 Days"
+                        : trendFilter.dateMode === "30day"
+                        ? "Last 30 Days"
+                        : "Filtered"}
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">30-day breakdown of daily revenue logs</p>
               </div>
+              <CardFilterPopover
+                filter={trendFilter}
+                onFilterChange={setTrendFilter}
+              />
             </div>
             {sheetsLoading ? (
               <div className="h-64 sm:h-72 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
             ) : (
               <div className="h-64 sm:h-72 w-full min-w-0">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={revenueTrend} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
+                  <LineChart data={applyCardFilter(revenueTrend, trendFilter)} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#a1a1aa" }} tickFormatter={(v) => v.slice(5)} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#a1a1aa" }} tickFormatter={(v) => String(v).slice(5)} />
                     <YAxis tick={{ fontSize: 11, fill: "#a1a1aa" }} width={45} />
                     <Tooltip contentStyle={{ backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px", color: "#fff" }} labelStyle={{ color: "#a1a1aa", fontWeight: 600 }} />
                     <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} dot={{ r: 3, fill: "#3b82f6" }} activeDot={{ r: 6 }} />
@@ -492,6 +606,308 @@ export default function Dashboard() {
           </>
         )}
 
+        {/* ══════════ INTERNATIONAL SALES (MCP Live) ══════════ */}
+        {countryData.length > 0 && (
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Globe className="text-emerald-400" size={20} />
+              <h3 className="text-base font-bold text-white tracking-tight">International Sales</h3>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE from MCP
+              </span>
+            </div>
+            <p className="text-xs text-[var(--text-muted)] mb-4">Cross-country sales comparison normalized to USD (current month)</p>
+            {countryLoading ? (
+              <div className="h-[300px] rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
+            ) : (
+              <div className="h-[300px] w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={countryData} layout="vertical" margin={{ left: 10, right: 30 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+                    <YAxis type="category" dataKey="country" width={90} tick={{ fontSize: 11, fill: "#a1a1aa" }} />
+                    <Tooltip
+                      formatter={(v: any) => [`$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "USD"]}
+                      contentStyle={{ backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px", color: "#fff" }}
+                    />
+                    <Bar dataKey="usd_amount" radius={[0, 6, 6, 0]}>
+                      {countryData.map((entry: any) => (
+                        <Cell key={entry.country} fill={
+                          entry.country?.toUpperCase() === "INDIA" ? "#3b82f6" :
+                          entry.country?.toUpperCase() === "UAE" ? "#10b981" :
+                          entry.country?.toUpperCase() === "OMAN" ? "#f59e0b" :
+                          entry.country?.toUpperCase() === "QATAR" ? "#a855f7" :
+                          entry.country?.toUpperCase() === "PAKISTAN" ? "#ef4444" :
+                          entry.country?.toUpperCase() === "MALAYSIA" ? "#06b6d4" :
+                          entry.country?.toUpperCase() === "UK" ? "#ec4899" :
+                          entry.country?.toUpperCase() === "BAHRAIN" ? "#f97316" : "#6b7280"
+                        } />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {/* Country summary cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
+              {countryData.map((c: any) => (
+                <div key={c.country} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card-hover)] p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2.5 h-2.5 rounded-full" style={{
+                      background: c.country?.toUpperCase() === "INDIA" ? "#3b82f6" :
+                        c.country?.toUpperCase() === "UAE" ? "#10b981" :
+                        c.country?.toUpperCase() === "OMAN" ? "#f59e0b" :
+                        c.country?.toUpperCase() === "QATAR" ? "#a855f7" :
+                        c.country?.toUpperCase() === "PAKISTAN" ? "#ef4444" :
+                        c.country?.toUpperCase() === "MALAYSIA" ? "#06b6d4" :
+                        c.country?.toUpperCase() === "UK" ? "#ec4899" :
+                        c.country?.toUpperCase() === "BAHRAIN" ? "#f97316" : "#6b7280"
+                    }} />
+                    <span className="text-xs font-semibold text-white">{c.country}</span>
+                  </div>
+                  <p className="text-lg font-bold text-white">${c.usd_amount?.toLocaleString()}</p>
+                  <p className="text-[10px] text-[var(--text-muted)]">{c.sales_count} sales · ${c.avg_ticket_usd?.toFixed(0)} avg</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════ STOCK POSITION (MCP Live) ══════════ */}
+        <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 min-w-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Package className="text-amber-400" size={20} />
+              <h3 className="text-base font-bold text-white tracking-tight">Stock Position</h3>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE from MCP
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Filter size={14} className="text-[var(--text-muted)]" />
+              <select
+                value={stockCountryId}
+                onChange={(e) => setStockCountryId(Number(e.target.value))}
+                className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg px-3 py-1.5 text-xs text-white"
+              >
+                <option value={1}>India</option>
+                <option value={2}>Oman</option>
+                <option value={4}>UAE</option>
+                <option value={5}>Malaysia</option>
+                <option value={6}>UK</option>
+                <option value={7}>Bahrain</option>
+                <option value={8}>Qatar</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-[var(--text-muted)] mb-4">Current inventory levels by shop</p>
+          {stockLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-12 rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
+              ))}
+            </div>
+          ) : stockData.length === 0 ? (
+            <div className="text-center py-8 text-[var(--text-muted)] text-sm">No stock data available</div>
+          ) : (
+            <div className="space-y-2">
+              {/* Summary row */}
+              <div className="flex gap-4 mb-3">
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--text-muted)] uppercase">Total Units</p>
+                  <p className="text-lg font-bold text-white">{stockData.reduce((s: number, shop: any) => s + (shop.total_units || 0), 0).toLocaleString()}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--text-muted)] uppercase">Shops</p>
+                  <p className="text-lg font-bold text-white">{stockData.length}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-[var(--text-muted)] uppercase">SKUs</p>
+                  <p className="text-lg font-bold text-white">{stockData.reduce((s: number, shop: any) => s + (shop.items?.length || 0), 0)}</p>
+                </div>
+              </div>
+              {stockData.map((shop: any) => (
+                <div key={shop.shop} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card-hover)] overflow-hidden">
+                  <button
+                    onClick={() => {
+                      setStockExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(shop.shop)) next.delete(shop.shop);
+                        else next.add(shop.shop);
+                        return next;
+                      });
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Package size={14} className="text-[var(--text-muted)]" />
+                      <span className="text-sm font-medium text-white">{shop.shop}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs text-[var(--text-muted)]">{shop.items?.length || 0} SKUs</span>
+                      <span className={`text-sm font-bold ${(shop.total_units || 0) < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                        {shop.total_units || 0}
+                      </span>
+                    </div>
+                  </button>
+                  {stockExpanded.has(shop.shop) && shop.items && (
+                    <div className="border-t border-[var(--border-subtle)]">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="text-[10px] text-[var(--text-muted)] uppercase">
+                            <th className="text-left px-4 py-2">Model</th>
+                            <th className="text-left px-4 py-2">Material</th>
+                            <th className="text-left px-4 py-2">Position</th>
+                            <th className="text-right px-4 py-2">Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shop.items.map((item: any, i: number) => (
+                            <tr key={i} className="border-t border-[var(--border-subtle)]/50 hover:bg-white/5">
+                              <td className="px-4 py-1.5 text-xs text-white">{item.model}</td>
+                              <td className="px-4 py-1.5 text-xs text-[var(--text-muted)]">{item.material}</td>
+                              <td className="px-4 py-1.5 text-xs text-[var(--text-muted)]">{item.position}</td>
+                              <td className={`px-4 py-1.5 text-xs text-right font-medium ${(item.count || 0) < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                {item.count}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ══════════ ALL BRANCHES (MCP Live) ══════════ */}
+        {branchesData.length > 0 && (
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <MapPin className="text-cyan-400" size={20} />
+              <h3 className="text-base font-bold text-white tracking-tight">All Branches</h3>
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                LIVE from MCP
+              </span>
+            </div>
+            <p className="text-xs text-[var(--text-muted)] mb-4">
+              {branchesData.length} branches across {new Set(branchesData.map((b: any) => b.country)).size} countries
+            </p>
+
+            {/* Summary cards by country */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {Object.entries(
+                branchesData.reduce((acc: Record<string, number>, b: any) => {
+                  acc[b.country] = (acc[b.country] || 0) + 1;
+                  return acc;
+                }, {})
+              ).map(([country, count]) => (
+                <span key={country} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white/5 border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                  <span className="w-2 h-2 rounded-full" style={{
+                    background: country === "India" ? "#3b82f6" :
+                      country === "UAE" ? "#10b981" :
+                      country === "Oman" ? "#f59e0b" :
+                      country === "Qatar" ? "#a855f7" :
+                      country === "Pakistan" ? "#ef4444" :
+                      country === "Malaysia" ? "#06b6d4" :
+                      country === "UK" ? "#ec4899" :
+                      country === "Bahrain" ? "#f97316" : "#6b7280"
+                  }} />
+                  {country}: {count}
+                </span>
+              ))}
+            </div>
+
+            {branchesLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-14 rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(
+                  branchesData.reduce((acc: Record<string, any[]>, b: any) => {
+                    if (!acc[b.country]) acc[b.country] = [];
+                    acc[b.country].push(b);
+                    return acc;
+                  }, {})
+                ).map(([country, shops]) => (
+                  <div key={country}>
+                    <button
+                      onClick={() => {
+                        setBranchesExpanded((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(country)) next.delete(country);
+                          else next.add(country);
+                          return next;
+                        });
+                      }}
+                      className="flex items-center justify-between w-full px-4 py-2.5 rounded-xl bg-white/5 border border-[var(--border-subtle)] hover:bg-white/8 transition-colors mb-1"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{
+                          background: country === "India" ? "#3b82f6" :
+                            country === "UAE" ? "#10b981" :
+                            country === "Oman" ? "#f59e0b" :
+                            country === "Qatar" ? "#a855f7" :
+                            country === "Pakistan" ? "#ef4444" :
+                            country === "Malaysia" ? "#06b6d4" :
+                            country === "UK" ? "#ec4899" :
+                            country === "Bahrain" ? "#f97316" : "#6b7280"
+                        }} />
+                        <span className="text-sm font-semibold text-white">{country}</span>
+                        <span className="text-xs text-[var(--text-muted)]">({shops.length} branches)</span>
+                      </div>
+                      <span className="text-xs text-[var(--text-muted)]">{branchesExpanded.has(country) ? "▲" : "▼"}</span>
+                    </button>
+                    {branchesExpanded.has(country) && (
+                      <div className="ml-4 space-y-1 mt-1 mb-2">
+                        {shops.map((b: any) => (
+                          <div key={b.shop} className="flex items-center justify-between px-4 py-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card-hover)] hover:bg-white/5 transition-colors">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Store size={14} className="text-[var(--text-muted)] shrink-0" />
+                              <span className="text-sm font-medium text-white truncate">{b.shop}</span>
+                              {b.status && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25 shrink-0">
+                                  {b.status}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-4 shrink-0">
+                              <div className="text-right">
+                                <p className="text-[10px] text-[var(--text-muted)]">Target</p>
+                                <p className="text-xs font-medium text-white">{b.target > 0 ? `$${(b.target / 1000).toFixed(0)}K` : "—"}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] text-[var(--text-muted)]">Achieved</p>
+                                <p className={`text-xs font-bold ${b.achievement_pct >= 65 ? "text-emerald-400" : b.achievement_pct >= 35 ? "text-amber-400" : "text-red-400"}`}>
+                                  {b.achievement_pct > 0 ? `${b.achievement_pct.toFixed(1)}%` : "—"}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] text-[var(--text-muted)]">Stock</p>
+                                <p className={`text-xs font-medium ${b.stock_units < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                  {b.stock_units || 0}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ══════════ MARKETING & SOCIAL MEDIA SECTION (from xlsx) ══════════ */}
         {marketingData && (
           <>
@@ -584,7 +1000,7 @@ export default function Dashboard() {
         {/* Loading indicator for sheets */}
         {sheetsLoading && (
           <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-8 text-center">
-            <div className="text-sm text-[var(--text-muted)]">Loading store performance data from Google Sheets...</div>
+            <div className="text-sm text-[var(--text-muted)]">Loading dashboard data...</div>
           </div>
         )}
 

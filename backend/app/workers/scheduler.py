@@ -53,6 +53,17 @@ async def poll_instagram_comments():
         logger.error("Instagram comment polling error: %s", e)
 
 
+async def sync_tele_call_leads():
+    from ..db.session import AsyncSessionLocal
+    from ..services.tele_call_sync import sync_tele_call_leads as _sync
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await _sync(db)
+    except Exception as e:
+        logger.error("Tele call leads sync error: %s", e)
+
+
 def start_scheduler():
     if os.getenv("ENABLE_SCHEDULER", "1") != "1":
         logger.info("Scheduler disabled via ENABLE_SCHEDULER=0")
@@ -78,5 +89,15 @@ def start_scheduler():
         coalesce=True,
         misfire_grace_time=600,
     )
+    scheduler.add_job(
+        sync_tele_call_leads,
+        "interval",
+        minutes=5,
+        id="tele_call_leads_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     scheduler.start()
-    logger.info("Scheduler started (sheet sync: 1min, Instagram poll: 15min)")
+    logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min)")

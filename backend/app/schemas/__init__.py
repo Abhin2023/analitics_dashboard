@@ -36,6 +36,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
+    password: Optional[str] = None
     role_id: Optional[int] = None
     is_active: Optional[bool] = None
     store_ids: Optional[List[int]] = None
@@ -53,6 +54,10 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
 
 
 class UserMeResponse(BaseModel):

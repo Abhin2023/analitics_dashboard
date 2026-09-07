@@ -1,12 +1,13 @@
 import logging
 import socketio
 from .core.security import decode_token
+from .core.config import settings
 
 logger = logging.getLogger(__name__)
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",
+    cors_allowed_origins=settings.cors_origins_list,
     logger=False,
     engineio_logger=False,
 )

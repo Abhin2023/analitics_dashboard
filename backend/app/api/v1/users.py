@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from ...core.deps import get_db, require_permission
 from ...core.security import hash_password
 from ...models.models import User, Role, UserStoreAccess
-from ...schemas import UserCreate, UserUpdate, UserResponse
+from ...schemas import UserCreate, UserUpdate, UserResponse, ResetPasswordRequest
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -14,7 +15,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     _user: User = require_permission("users", "view"),
 ):
-    result = await db.execute(select(User).order_by(User.name))
+    result = await db.execute(select(User).order_by(User.name).options(selectinload(User.store_access)))
     users = result.scalars().all()
     role_cache = {}
     out = []
@@ -66,13 +67,29 @@ async def create_user(
     )
 
 
+@router.post("/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: int,
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_permission("users", "edit"),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = hash_password(body.new_password)
+    await db.commit()
+    return {"message": f"Password updated for {user.name}"}
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     _user: User = require_permission("users", "view"),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).options(selectinload(User.store_access)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -93,13 +110,16 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     _user: User = require_permission("users", "edit"),
 ):
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id).options(selectinload(User.store_access)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    for field, value in body.model_dump(exclude_unset=True, exclude={"store_ids"}).items():
+    for field, value in body.model_dump(exclude_unset=True, exclude={"store_ids", "password"}).items():
         setattr(user, field, value)
+
+    if body.password:
+        user.password_hash = hash_password(body.password)
 
     if body.store_ids is not None:
         await db.execute(

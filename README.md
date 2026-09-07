@@ -43,12 +43,14 @@ python scripts/seed.py
 ```
 
 This creates:
-- 7 roles (SuperAdmin, Admin, CEO, COO, Regional Manager, Team Leader, Store Staff, Viewer)
-- ~60 permissions (14 resources x ~4-5 actions)
+- 9 roles (SuperAdmin, Admin, CEO, COO, Regional Manager, Team Leader, Store Staff, Telecaller, Salesperson, Viewer)
+- 90 permissions (15 resources x 6 actions)
 - SuperAdmin account: `admin@breakprotection.com` / `admin123`
 - COO account: `coo@breakprotection.com` / `coo123`
-- 6 Team Leaders with store access
-- 24 stores (all INR)
+- 11 Team Leaders (6 original + 5 city-based) with store access
+- 5 Salespersons (1 per city-based TL)
+- 5 Telecallers (tele call team)
+- 29 stores (24 original + 5 city-based)
 - 5 currencies (INR, USD, GBP, AED, EUR)
 - 10 KPI weights (summing to 1.00)
 - 4 incentive bands (with Below Target placeholder)
@@ -131,9 +133,67 @@ python -m pytest tests/ -v
 | SuperAdmin | Full | Full | Full | Full | Full | Full | Full | Full |
 | Admin | Full | Full | Full | Full | Full | Full | Full | Full |
 | CEO | View | View | View | View | View | View+Export | View | - |
+| COO | View | View+Edit | View | View | View | View+Export | View | - |
+| Regional Manager | View | View+Edit | View+Edit | View+Edit | View+Edit | View | View | - |
 | Team Leader | View | View | View+Edit | Create+Edit | Create+Edit | View | View | - |
 | Store Staff | View | View | Create | Create | View | - | - | - |
+| **Telecaller** | View | - | View | Create+Edit | - | - | - | - |
+| **Salesperson** | View | - | Create | Create+Edit | Create | - | - | - |
 | Viewer | View | View | View | View | View | View | View | - |
+
+## Login Credentials
+
+### Admin & Management
+
+| Role | Name | Email | Password |
+|------|------|-------|----------|
+| SuperAdmin | SuperAdmin | `admin@breakprotection.com` | `admin123` |
+| COO | COO | `coo@breakprotection.com` | `coo123` |
+
+### Team Leaders (Original)
+
+| Role | Name | Email | Password | Stores |
+|------|------|-------|----------|--------|
+| Team Leader | Harsh | `breakprotectiontele@gmail.com` | `harsh123` | Kerala Kochi, Kerala Calicut, Kerala Kottkal, Kerala Wayanad |
+| Team Leader | Sam | `breakprotectionkodchennai@gmail.com` | `sam123` | Kerala Trivandrum, Chennai Kodambakam, Chennai Velachery, Tn Coimbatore, Kerala Kollam |
+| Team Leader | Michael | `michael.breakprotection@gmail.com` | `michael123` | Kerala Thrissur, Kerala Kannur, Kerala Palakkad, Guwahati, Kerala Pathanamthitta, Kerala Kasargod |
+| Team Leader | Vishnu | `breakprotectionmarathahalli@gmail.com` | `vishnu123` | Bangalore Marathahalli, Mangalore, Mysore |
+| Team Leader | Abdullah | `breakprotectionhytech@gmail.com` | `abdullah123` | Mumbai Korum, Mumbai Bandra, Delhi Lajpat Nagar, Hyderabad Kukatpally, Hyderabad Hitech |
+| Team Leader | Nazil | `breakprotectionindiranagar@gmail.com` | `nazil123` | Bangalore Indiranagar |
+
+### Team Leaders (City-Based)
+
+| Role | Name | Email | Password | Store |
+|------|------|-------|----------|-------|
+| Team Leader | Guwahati | `guwahati@breakprotection.com` | `guwahati123` | Guwahati Store |
+| Team Leader | Delhi | `delhi@breakprotection.com` | `delhi123` | Delhi Store |
+| Team Leader | Kerala | `kerala@breakprotection.com` | `kerala123` | Kerala Store |
+| Team Leader | Chennai | `chennai@breakprotection.com` | `chennai123` | Chennai Store |
+| Team Leader | Mumbai | `mumbai@breakprotection.com` | `mumbai123` | Mumbai Store |
+
+### Salespersons
+
+| Role | Name | Email | Password | TL Under |
+|------|------|-------|----------|----------|
+| Salesperson | Ravi | `ravi@breakprotection.com` | `ravi123` | Guwahati |
+| Salesperson | Amit | `amit@breakprotection.com` | `amit123` | Delhi |
+| Salesperson | Priya | `priya@breakprotection.com` | `priya123` | Kerala |
+| Salesperson | Deepak | `deepak@breakprotection.com` | `deepak123` | Chennai |
+| Salesperson | Rohit | `rohit@breakprotection.com` | `rohit123` | Mumbai |
+
+### Telecallers
+
+| Role | Name | Email | Password |
+|------|------|-------|----------|
+| Telecaller | SANJAY | `sanjay@breakprotection.com` | `sanjay123` |
+| Telecaller | Nazil Tele | `nazil.tele@breakprotection.com` | `nazil123` |
+| Telecaller | Nirmala | `nirmala@breakprotection.com` | `nirmala123` |
+| Telecaller | SAM Tele | `sam.tele@breakprotection.com` | `sam123` |
+| Telecaller | Ekbal | `ekbal@breakprotection.com` | `ekbal123` |
+
+### Creating Additional Users
+
+Admins can create more Team Leaders and Salespersons via **Settings > Users** in the dashboard. The admin account has full `users:create` permission.
 
 ## Google Sheets Sync
 

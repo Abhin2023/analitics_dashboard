@@ -1,5 +1,4 @@
 import logging
-import re
 import json
 from typing import Optional
 import httpx
@@ -10,61 +9,138 @@ ANTHROPIC_BASE = "https://api.anthropic.com/v1"
 OPENAI_BASE = "https://api.openai.com/v1"
 
 
+ROUTE_CONVERSATION_TOOL = {
+    "name": "route_conversation",
+    "description": (
+        "Route the conversation to the correct action. "
+        "You MUST call this tool exactly once per user message."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "sentiment": {
+                "type": "string",
+                "enum": ["positive", "neutral", "negative", "angry"],
+                "description": "The user's sentiment in this message.",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["trigger_form", "answer_faq", "general_reply"],
+                "description": (
+                    "Which action to take. Use 'trigger_form' when the user clearly "
+                    "needs a structured data-collection flow. Use 'answer_faq' only "
+                    "when the user's question matches a provided FAQ entry. Otherwise "
+                    "use 'general_reply'."
+                ),
+            },
+            "form_slug": {
+                "type": "string",
+                "description": (
+                    "The slug of the form to trigger. Required when action is "
+                    "'trigger_form'. Must be one of the slugs listed in the system "
+                    "prompt. Leave empty or omit for other actions."
+                ),
+            },
+            "confidence": {
+                "type": "number",
+                "description": "Self-reported confidence 0.0-1.0 for the chosen action.",
+            },
+            "reply_text": {
+                "type": "string",
+                "description": (
+                    "The natural-language reply to send to the user. When action is "
+                    "'trigger_form', this is a brief acknowledgment before the form "
+                    "starts. When action is 'answer_faq', answer ONLY from the "
+                    "injected FAQ context — never invent details. When action is "
+                    "'general_reply', respond helpfully and concisely."
+                ),
+            },
+        },
+        "required": ["sentiment", "action", "confidence", "reply_text"],
+    },
+}
+
+
 class AIResponse:
-    def __init__(self, text: str, input_tokens: int, output_tokens: int, model: str):
+    def __init__(
+        self,
+        text: str,
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        action: str = "general_reply",
+        form_slug: str = "",
+        sentiment: str = "neutral",
+        confidence: float = 0.0,
+        reply_text: str = "",
+    ):
         self.text = text
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.model = model
+        self.action = action
+        self.form_slug = form_slug
+        self.sentiment = sentiment
+        self.confidence = confidence
+        self.reply_text = reply_text
 
 
-def parse_intent_from_response(text: str) -> tuple[str, dict | None]:
-    match = re.search(r"<intent>\s*(.*?)\s*</intent>", text, re.DOTALL)
-    if match:
-        clean_text = text[:match.start()].strip()
-        try:
-            intent = json.loads(match.group(1))
-            return clean_text, intent
-        except json.JSONDecodeError:
-            return clean_text, None
-    return text, None
+def build_system_prompt(
+    base_prompt: str,
+    active_forms: list[dict],
+    active_faqs: list[dict],
+    already_triggered_forms: list[str] | None = None,
+) -> str:
+    sections = [base_prompt]
+
+    if active_forms:
+        form_list = "\n".join(
+            f"- slug=\"{f['slug']}\": {f['description']} "
+            f"(collects: {', '.join(f['field_keys'])})"
+            for f in active_forms
+        )
+        sections.append(
+            f"\nAvailable forms (use the form_slug value exactly):\n{form_list}\n"
+            f"\nRules for forms:\n"
+            f"- Only trigger a form when the user clearly needs that data collected.\n"
+            f"- Do NOT re-trigger a form the user has already completed or is in the "
+            f"middle of — if the form slug appears in 'already_triggered_forms', do "
+            f"not use action='trigger_form' for it unless the user explicitly asks to "
+            f"start over.\n"
+            f"- Set reply_text to a brief, warm acknowledgment before the form begins."
+        )
+
+    if active_faqs:
+        faq_block = "\n\n".join(
+            f"Q: {faq['question']}\nA: {faq['answer']}"
+            for faq in active_faqs
+        )
+        sections.append(
+            f"\nFAQ knowledge base — answer ONLY from these entries when action is "
+            f"'answer_faq'. If no FAQ matches, use 'general_reply' and let a human "
+            f"follow up.\n\n{faq_block}"
+        )
+
+    if already_triggered_forms:
+        sections.append(
+            f"\nForms already triggered in this conversation: "
+            f"{', '.join(already_triggered_forms)}. Do not re-trigger these unless "
+            f"the user explicitly requests it."
+        )
+
+    sections.append(
+        "\nYou MUST call the route_conversation tool exactly once. "
+        "Do not output any text outside the tool call."
+    )
+
+    return "\n".join(sections)
 
 
-def build_form_aware_prompt(base_prompt: str, active_forms: list[dict]) -> str:
-    if not active_forms:
-        return base_prompt
-
-    form_list = "\n".join([
-        f"- {f['name']}: {f['ai_prompt_hint']} (fields: {', '.join(f['field_keys'])})"
-        for f in active_forms
-    ])
-
-    form_instructions = f"""
-
-You have access to these forms that you can trigger when appropriate:
-
-{form_list}
-
-When a user message clearly indicates they need one of these forms, you MUST respond with BOTH:
-1. A natural, helpful conversational response
-2. A structured intent block wrapped in <intent> tags
-
-Example format:
-I'd be happy to help you file a complaint. Let me take your details.
-
-<intent>
-{{"trigger_form": "complaint", "confidence": 0.9, "pre_filled": {{"complaint": "user's issue summarized"}}}}
-</intent>
-
-Rules:
-- Only trigger forms that are listed above
-- Set confidence between 0.0 and 1.0 (only trigger if confidence > 0.7)
-- Pre-fill fields when the user has already provided that information in their message
-- If no form matches, respond normally WITHOUT the intent block
-- Keep your conversational response warm and helpful
-- For forms with fields already provided by the user, include them in pre_filled
-"""
-    return base_prompt + form_instructions
+def _extract_tool_result(content_blocks: list[dict]) -> Optional[dict]:
+    for block in content_blocks:
+        if block.get("type") == "tool_use" and block.get("name") == "route_conversation":
+            return block.get("input", {})
+    return None
 
 
 class ClaudeProvider:
@@ -73,13 +149,16 @@ class ClaudeProvider:
         self.model = model
         self.client = httpx.AsyncClient(timeout=60.0)
 
-    async def generate(self, messages: list[dict], system_prompt: str, max_tokens: int = 1024) -> AIResponse:
-        formatted_messages = []
-        for msg in messages:
-            formatted_messages.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", ""),
-            })
+    async def generate(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        max_tokens: int = 1024,
+    ) -> AIResponse:
+        formatted_messages = [
+            {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            for msg in messages
+        ]
         try:
             resp = await self.client.post(
                 f"{ANTHROPIC_BASE}/messages",
@@ -93,21 +172,51 @@ class ClaudeProvider:
                     "max_tokens": max_tokens,
                     "system": system_prompt,
                     "messages": formatted_messages,
+                    "tools": [ROUTE_CONVERSATION_TOOL],
+                    "tool_choice": {
+                        "type": "tool",
+                        "name": "route_conversation",
+                    },
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            text = data.get("content", [{}])[0].get("text", "")
             usage = data.get("usage", {})
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+
+            content = data.get("content", [])
+            tool_result = _extract_tool_result(content)
+
+            if tool_result:
+                return AIResponse(
+                    text=tool_result.get("reply_text", ""),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=self.model,
+                    action=tool_result.get("action", "general_reply"),
+                    form_slug=tool_result.get("form_slug", ""),
+                    sentiment=tool_result.get("sentiment", "neutral"),
+                    confidence=tool_result.get("confidence", 0.0),
+                    reply_text=tool_result.get("reply_text", ""),
+                )
+
+            fallback_text = ""
+            for block in content:
+                if block.get("type") == "text":
+                    fallback_text = block.get("text", "")
+                    break
             return AIResponse(
-                text=text,
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
+                text=fallback_text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
                 model=self.model,
             )
         except Exception as e:
             logger.error("Claude API error: %s", e)
-            return AIResponse(text="", input_tokens=0, output_tokens=0, model=self.model)
+            return AIResponse(
+                text="", input_tokens=0, output_tokens=0, model=self.model
+            )
 
     async def close(self):
         await self.client.aclose()
@@ -119,13 +228,28 @@ class OpenAIProvider:
         self.model = model
         self.client = httpx.AsyncClient(timeout=60.0)
 
-    async def generate(self, messages: list[dict], system_prompt: str, max_tokens: int = 1024) -> AIResponse:
+    async def generate(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        max_tokens: int = 1024,
+    ) -> AIResponse:
         formatted_messages = [{"role": "system", "content": system_prompt}]
         for msg in messages:
             formatted_messages.append({
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
             })
+
+        openai_tool = {
+            "type": "function",
+            "function": {
+                "name": ROUTE_CONVERSATION_TOOL["name"],
+                "description": ROUTE_CONVERSATION_TOOL["description"],
+                "parameters": ROUTE_CONVERSATION_TOOL["input_schema"],
+            },
+        }
+
         try:
             resp = await self.client.post(
                 f"{OPENAI_BASE}/chat/completions",
@@ -136,22 +260,60 @@ class OpenAIProvider:
                 json={
                     "model": self.model,
                     "messages": formatted_messages,
+                    "tools": [openai_tool],
+                    "tool_choice": {
+                        "type": "function",
+                        "function": {"name": "route_conversation"},
+                    },
                     "max_tokens": max_tokens,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
-            text = data["choices"][0]["message"]["content"]
             usage = data.get("usage", {})
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+
+            choices = data.get("choices", [])
+            if choices:
+                message = choices[0].get("message", {})
+                tool_calls = message.get("tool_calls", [])
+                if tool_calls:
+                    args_str = tool_calls[0].get("function", {}).get("arguments", "{}")
+                    try:
+                        tool_result = json.loads(args_str)
+                    except json.JSONDecodeError:
+                        tool_result = {}
+
+                    return AIResponse(
+                        text=tool_result.get("reply_text", ""),
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        model=self.model,
+                        action=tool_result.get("action", "general_reply"),
+                        form_slug=tool_result.get("form_slug", ""),
+                        sentiment=tool_result.get("sentiment", "neutral"),
+                        confidence=tool_result.get("confidence", 0.0),
+                        reply_text=tool_result.get("reply_text", ""),
+                    )
+
+                fallback_text = message.get("content", "")
+                return AIResponse(
+                    text=fallback_text,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    model=self.model,
+                )
+
             return AIResponse(
-                text=text,
-                input_tokens=usage.get("prompt_tokens", 0),
-                output_tokens=usage.get("completion_tokens", 0),
-                model=self.model,
+                text="", input_tokens=input_tokens,
+                output_tokens=output_tokens, model=self.model,
             )
         except Exception as e:
             logger.error("OpenAI API error: %s", e)
-            return AIResponse(text="", input_tokens=0, output_tokens=0, model=self.model)
+            return AIResponse(
+                text="", input_tokens=0, output_tokens=0, model=self.model
+            )
 
     async def close(self):
         await self.client.aclose()
@@ -178,8 +340,7 @@ class AIService:
     ) -> AIResponse:
         provider = self._get_provider(provider_name, api_key, model)
         try:
-            result = await provider.generate(messages, system_prompt)
-            return result
+            return await provider.generate(messages, system_prompt)
         finally:
             await provider.close()
 

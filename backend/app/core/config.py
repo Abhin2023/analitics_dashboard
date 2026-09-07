@@ -12,13 +12,18 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = "mysql+aiomysql://root@localhost:3306/bp_analytics"
-    JWT_SECRET_KEY: str = "change-me-to-a-random-secret"
+    JWT_SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    SECURE_COOKIES: bool = False
     GOOGLE_SERVICE_ACCOUNT_JSON_PATH: str = ""
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:8001"
     BASE_REPORTING_CURRENCY: str = "INR"
     SMARTSERVICE_MCP_URL: str = "https://smartserviceapitemp.azurewebsites.net/mcp"
+    SMARTSERVICE_CLIENT_ID: str = "Abhin"
+    SMARTSERVICE_CLIENT_SECRET: str = ""
+    SMARTSERVICE_SCOPE: str = "mcp.read"
+    SMARTSERVICE_TOKEN_URL: str = "https://smartserviceapitemp.azurewebsites.net/connect/token"
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

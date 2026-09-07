@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import SetPassword from "./pages/SetPassword";
 import Dashboard from "./pages/Dashboard";
+import RoleDashboard from "./components/dashboard/RoleDashboard";
 import SalesOverview from "./pages/SalesOverview";
 import Operations from "./pages/Operations";
 import OperationsSubmit from "./pages/OperationsSubmit";
@@ -19,6 +20,8 @@ import Tasks from "./pages/Tasks";
 import Performance from "./pages/Performance";
 import Reports from "./pages/Reports";
 import Investments from "./pages/Investments";
+import StockPosition from "./pages/StockPosition";
+import CountryComparison from "./pages/CountryComparison";
 import RolesPermissions from "./pages/settings/RolesPermissions";
 import UserManagement from "./pages/settings/Users";
 import KPIWeights from "./pages/settings/KPIWeights";
@@ -32,6 +35,7 @@ import Conversations from "./pages/instagram/Conversations";
 import CommentRules from "./pages/instagram/CommentRules";
 import FormSubmissions from "./pages/instagram/FormSubmissions";
 import HostedForm from "./pages/instagram/HostedForm";
+import TeleCallLeads from "./pages/TeleCallLeads";
 
 function SocketProvider({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token);
@@ -51,18 +55,21 @@ export default function App() {
         <Route path="/set-password/:token" element={<SetPassword />} />
 
         <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard" element={<RoleDashboard />} />
           <Route path="/sales-overview" element={<SalesOverview />} />
           <Route path="/operations" element={<Operations />} />
           <Route path="/operations/submit" element={<OperationsSubmit />} />
           <Route path="/team-leaders" element={<TeamLeaders />} />
           <Route path="/team-leaders/:id" element={<TeamLeaderDetail />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/leads/update" element={<TeleCallLeads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/performance" element={<Performance />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/stock-position" element={<StockPosition />} />
+          <Route path="/country-comparison" element={<CountryComparison />} />
           <Route path="/investments" element={<Investments />} />
           <Route path="/instagram" element={<InstagramDashboard />} />
           <Route path="/instagram/setup" element={<InstagramSetup />} />

@@ -3,24 +3,82 @@ import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 import { useState } from "react";
-import { Users, Plus, Trash2, ShieldCheck, UserCheck } from "lucide-react";
+import { Users, Plus, Trash2, ShieldCheck, UserCheck, Edit3, Save, X, Eye, EyeOff, KeyRound } from "lucide-react";
 
 export default function UserManagement() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "", role_id: "", store_ids: "" });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", role_id: 0, is_active: true, store_ids: "" });
+  const [resetModalId, setResetModalId] = useState<number | null>(null);
+  const [resetModalName, setResetModalName] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+  const [showResetPw, setShowResetPw] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState("");
   const queryClient = useQueryClient();
+
   const { data: users, isLoading } = useQuery({ queryKey: ["users"], queryFn: () => api.get<any[]>("/users/") });
   const { data: roles } = useQuery({ queryKey: ["roles"], queryFn: () => api.get<any[]>("/roles/") });
 
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/users", data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setShowForm(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setShowForm(false); setForm({ name: "", email: "", password: "", role_id: "", store_ids: "" }); },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => api.put(`/users/${id}`, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setEditingId(null); },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.del(`/users/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
   });
+
+  const resetPwMutation = useMutation({
+    mutationFn: ({ id, password }: { id: number; password: string }) =>
+      api.post(`/users/${id}/reset-password`, { new_password: password }),
+    onSuccess: (_: any, vars: { id: number; password: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setResetSuccess(`Password updated for ${resetModalName}`);
+      setResetPassword("");
+      setShowResetPw(false);
+      setTimeout(() => { setResetModalId(null); setResetSuccess(""); }, 1500);
+    },
+  });
+
+  const startEdit = (u: any) => {
+    setEditingId(u.id);
+    setEditForm({
+      name: u.name,
+      email: u.email,
+      role_id: u.role_id,
+      is_active: u.is_active,
+      store_ids: u.store_ids?.join(", ") || "",
+    });
+  };
+
+  const openResetModal = (u: any) => {
+    setResetModalId(u.id);
+    setResetModalName(u.name);
+    setResetPassword("");
+    setShowResetPw(false);
+    setResetSuccess("");
+  };
+
+  const handleUpdate = () => {
+    if (!editingId) return;
+    updateMutation.mutate({
+      id: editingId,
+      data: {
+        name: editForm.name,
+        email: editForm.email,
+        role_id: editForm.role_id,
+        is_active: editForm.is_active,
+        store_ids: editForm.store_ids ? editForm.store_ids.split(",").map(Number) : [],
+      },
+    });
+  };
 
   return (
     <ErrorBoundary>
@@ -32,7 +90,7 @@ export default function UserManagement() {
               User Management
             </h2>
             <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              Manage system access accounts, roles, and assigned store IDs
+              Manage system access accounts, roles, and assigned stores
             </p>
           </div>
 
@@ -41,7 +99,7 @@ export default function UserManagement() {
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/20 transition-all cursor-pointer shrink-0"
           >
             <Plus size={16} />
-            <span>{showForm ? "Cancel Form" : "Create User"}</span>
+            <span>{showForm ? "Cancel" : "Create User"}</span>
           </button>
         </div>
 
@@ -54,7 +112,7 @@ export default function UserManagement() {
                 store_ids: form.store_ids ? form.store_ids.split(",").map(Number) : [],
               });
             }}
-            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shadow-xl animate-fade-in"
+            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shadow-xl"
           >
             <input
               placeholder="Name *"
@@ -99,7 +157,7 @@ export default function UserManagement() {
               disabled={createMutation.isPending}
               className="sm:col-span-2 lg:col-span-5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
             >
-              {createMutation.isPending ? "Creating User..." : "Create User Account"}
+              {createMutation.isPending ? "Creating..." : "Create User Account"}
             </button>
           </form>
         )}
@@ -115,7 +173,7 @@ export default function UserManagement() {
                     <th className="py-3 px-4 font-semibold">User</th>
                     <th className="py-3 px-4 font-semibold">Email</th>
                     <th className="py-3 px-4 font-semibold">Role</th>
-                    <th className="py-3 px-4 font-semibold text-right">Assigned Stores</th>
+                    <th className="py-3 px-4 font-semibold text-right">Stores</th>
                     <th className="py-3 px-4 font-semibold">Status</th>
                     <th className="py-3 px-4 font-semibold text-right">Actions</th>
                   </tr>
@@ -123,36 +181,134 @@ export default function UserManagement() {
                 <tbody className="divide-y divide-[var(--border-subtle)]">
                   {(users || []).map((u: any) => (
                     <tr key={u.id} className="hover:bg-[var(--bg-card-hover)] transition-colors">
-                      <td className="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-full bg-[var(--accent-blue)]/15 border border-[var(--accent-blue)]/30 flex items-center justify-center text-[var(--accent-blue)] font-bold text-xs shrink-0">
-                          {u.name ? u.name.charAt(0).toUpperCase() : <UserCheck size={15} />}
-                        </div>
-                        <span>{u.name}</span>
+                      <td className="py-3 px-4 font-semibold text-white">
+                        {editingId === u.id ? (
+                          <input
+                            value={editForm.name}
+                            onChange={(e) => setEditForm(p => ({...p, name: e.target.value}))}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-8 w-8 rounded-full bg-[var(--accent-blue)]/15 border border-[var(--accent-blue)]/30 flex items-center justify-center text-[var(--accent-blue)] font-bold text-xs shrink-0">
+                              {u.name ? u.name.charAt(0).toUpperCase() : <UserCheck size={15} />}
+                            </div>
+                            <span>{u.name}</span>
+                          </div>
+                        )}
                       </td>
-                      <td className="py-3.5 px-4 text-xs text-[var(--text-secondary)]">{u.email}</td>
-                      <td className="py-3.5 px-4">
-                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20 capitalize">
-                          {u.role_name}
-                        </span>
+
+                      <td className="py-3 px-4 text-xs text-[var(--text-secondary)]">
+                        {editingId === u.id ? (
+                          <input
+                            type="email"
+                            value={editForm.email}
+                            onChange={(e) => setEditForm(p => ({...p, email: e.target.value}))}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                          />
+                        ) : (
+                          u.email
+                        )}
                       </td>
-                      <td className="py-3.5 px-4 text-right text-xs font-medium text-[var(--text-secondary)]">
-                        {u.store_ids?.length || 0} Stores
+
+                      <td className="py-3 px-4">
+                        {editingId === u.id ? (
+                          <select
+                            value={editForm.role_id}
+                            onChange={(e) => setEditForm(p => ({...p, role_id: Number(e.target.value)}))}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                          >
+                            {(roles || []).map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20 capitalize">
+                            {u.role_name}
+                          </span>
+                        )}
                       </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          u.is_active ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20"
-                        }`}>
-                          {u.is_active ? "Active" : "Inactive"}
-                        </span>
+
+                      <td className="py-3 px-4 text-right text-xs font-medium text-[var(--text-secondary)]">
+                        {editingId === u.id ? (
+                          <input
+                            value={editForm.store_ids}
+                            onChange={(e) => setEditForm(p => ({...p, store_ids: e.target.value}))}
+                            placeholder="1, 2, 3"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none focus:border-[var(--accent-blue)] text-right"
+                          />
+                        ) : (
+                          <span>{u.store_ids?.length || 0} Stores</span>
+                        )}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => deleteMutation.mutate(u.id)}
-                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                          title="Delete User"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+
+                      <td className="py-3 px-4">
+                        {editingId === u.id ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditForm(p => ({...p, is_active: !p.is_active}))}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                                editForm.is_active ? "bg-emerald-500" : "bg-zinc-600"
+                              }`}
+                            >
+                              <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                                editForm.is_active ? "translate-x-4.5" : "translate-x-0.5"
+                              }`} />
+                            </button>
+                            <span className="text-xs text-[var(--text-secondary)]">{editForm.is_active ? "Active" : "Inactive"}</span>
+                          </div>
+                        ) : (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            u.is_active ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20"
+                          }`}>
+                            {u.is_active ? "Active" : "Inactive"}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 text-right">
+                        {editingId === u.id ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={handleUpdate}
+                              disabled={updateMutation.isPending}
+                              className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer disabled:opacity-50"
+                              title="Save"
+                            >
+                              <Save size={15} />
+                            </button>
+                            <button
+                              onClick={() => setEditingId(null)}
+                              className="p-1.5 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors cursor-pointer"
+                              title="Cancel"
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => openResetModal(u)}
+                              className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer"
+                              title="Reset Password"
+                            >
+                              <KeyRound size={15} />
+                            </button>
+                            <button
+                              onClick={() => startEdit(u)}
+                              className="p-1.5 rounded-lg text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/10 transition-colors cursor-pointer"
+                              title="Edit User"
+                            >
+                              <Edit3 size={15} />
+                            </button>
+                            <button
+                              onClick={() => deleteMutation.mutate(u.id)}
+                              className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                              title="Delete User"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -161,6 +317,105 @@ export default function UserManagement() {
             </div>
           )}
         </div>
+
+        {resetModalId && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setResetModalId(null); setResetSuccess(""); } }}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-[var(--border-subtle)] shadow-2xl overflow-hidden"
+              style={{ background: "var(--bg-card)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border-subtle)]">
+                <div className="h-10 w-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center">
+                  <KeyRound size={20} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Reset Password</h3>
+                  <p className="text-xs text-[var(--text-muted)]">for {resetModalName}</p>
+                </div>
+                <button
+                  onClick={() => { setResetModalId(null); setResetSuccess(""); }}
+                  className="ml-auto p-1.5 rounded-lg hover:bg-white/5 text-[var(--text-muted)] hover:text-white transition-colors cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="px-6 py-5">
+                {resetSuccess ? (
+                  <div className="text-center py-4">
+                    <div className="h-12 w-12 rounded-full bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center mx-auto mb-3">
+                      <ShieldCheck size={24} className="text-emerald-400" />
+                    </div>
+                    <p className="text-sm font-semibold text-emerald-400">{resetSuccess}</p>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (resetPassword.length < 6) return;
+                      resetPwMutation.mutate({ id: resetModalId, password: resetPassword });
+                    }}
+                  >
+                    <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-2">
+                      New Password
+                    </label>
+                    <div className="relative mb-1">
+                      <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                      <input
+                        type={showResetPw ? "text" : "password"}
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                        placeholder="Enter new password (min 6 chars)"
+                        required
+                        minLength={6}
+                        autoFocus
+                        className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-sm text-white placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPw(!showResetPw)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white cursor-pointer"
+                      >
+                        {showResetPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                    {resetPassword && resetPassword.length < 6 && (
+                      <p className="text-xs text-amber-400 mt-1">Must be at least 6 characters</p>
+                    )}
+
+                    {resetPwMutation.isError && (
+                      <p className="text-xs text-red-400 mt-2">
+                        {(resetPwMutation.error as any)?.detail || "Failed to reset password"}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 mt-5">
+                      <button
+                        type="button"
+                        onClick={() => { setResetModalId(null); setResetSuccess(""); }}
+                        className="flex-1 px-4 py-2.5 rounded-xl border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-white/5 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={resetPwMutation.isPending || resetPassword.length < 6}
+                        className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-xs font-semibold shadow-lg shadow-amber-500/20 transition-all disabled:opacity-40 cursor-pointer"
+                      >
+                        {resetPwMutation.isPending ? "Updating..." : "Update Password"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

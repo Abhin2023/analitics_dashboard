@@ -14,6 +14,12 @@ import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 import { getSocket } from "@/lib/socket";
 import { formatMoney, formatNumber, formatPct } from "@/lib/formatMoney";
 import { curateKpis, buildSectionCharts, type KpiCard, type ChartDef } from "./sectionVisuals";
+import {
+  CardFilterPopover,
+  CardFilterState,
+  DEFAULT_CARD_FILTER,
+  applyCardFilter,
+} from "@/components/shared/CardFilterPopover";
 
 interface SummaryData {
   summary?: string;
@@ -84,19 +90,70 @@ function chartFormatter(unit?: ChartDef["unit"]) {
 }
 
 function SectionChartCard({ def }: { def: ChartDef }) {
+  const [filter, setFilter] = useState<CardFilterState>(DEFAULT_CARD_FILTER);
   const fmt = chartFormatter(def.unit);
   const tickFill = { fontSize: 10, fill: "#a1a1aa" };
   const tooltipStyle = { backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px" };
   const hasPctAxis = def.series.some((s) => s.yAxisId === "pct");
 
+  // Extract entity options (e.g. stores, names, or categories)
+  const entityOptions = useMemo(() => {
+    if (!def.data || !Array.isArray(def.data)) return [];
+    const set = new Set<string>();
+    def.data.forEach((row) => {
+      if (row.name) set.add(String(row.name));
+      if (row.store) set.add(String(row.store));
+      if (row.tl) set.add(String(row.tl));
+    });
+    return Array.from(set).slice(0, 30);
+  }, [def.data]);
+
+  // Apply card-level filters
+  const filteredData = useMemo(() => {
+    return applyCardFilter(def.data, filter);
+  }, [def.data, filter]);
+
+  const isFiltered =
+    filter.dateMode !== "all" || (filter.selectedEntity && filter.selectedEntity !== "all");
+
   return (
-    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 min-w-0 h-full">
-      <h3 className="text-sm font-bold text-white tracking-tight mb-1">{def.title}</h3>
-      {def.subtitle && <p className="text-xs text-[var(--text-muted)] mb-4">{def.subtitle}</p>}
-      <div className="h-64 w-full min-w-0">
+    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 min-w-0 h-full flex flex-col justify-between">
+      <div>
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div>
+            <h3 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+              {def.title}
+              {isFiltered && (
+                <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-medium">
+                  {filter.dateMode === "3day"
+                    ? "Last 3 Days"
+                    : filter.dateMode === "7day"
+                    ? "Last 7 Days"
+                    : filter.dateMode === "30day"
+                    ? "Last 30 Days"
+                    : filter.selectedEntity && filter.selectedEntity !== "all"
+                    ? filter.selectedEntity
+                    : "Filtered"}
+                </span>
+              )}
+            </h3>
+            {def.subtitle && <p className="text-xs text-[var(--text-muted)] mt-0.5">{def.subtitle}</p>}
+          </div>
+
+          {/* 3-Dot Filter Popover Menu */}
+          <CardFilterPopover
+            filter={filter}
+            onFilterChange={setFilter}
+            entityLabel="Entity"
+            entityOptions={entityOptions}
+          />
+        </div>
+      </div>
+
+      <div className="h-64 w-full min-w-0 mt-2">
         {def.type === "line" && (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={def.data} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
+            <LineChart data={filteredData} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis tick={tickFill} tickFormatter={fmt} width={70} />
@@ -113,7 +170,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
         )}
         {def.type === "bar" && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={def.data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <BarChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis tick={tickFill} tickFormatter={fmt} width={70} />
@@ -127,7 +184,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
         )}
         {def.type === "hbar" && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={def.data} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
+            <BarChart data={filteredData} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis type="number" tick={tickFill} tickFormatter={fmt} />
               <YAxis type="category" dataKey={def.xKey} tick={tickFill} width={130} />
@@ -148,8 +205,8 @@ function SectionChartCard({ def }: { def: ChartDef }) {
           return (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={def.data} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" nameKey="name" stroke="#11131e" strokeWidth={2}>
-                  {def.data.map((entry: any, i: number) => {
+                <Pie data={filteredData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} dataKey="value" nameKey="name" stroke="#11131e" strokeWidth={2}>
+                  {filteredData.map((entry: any, i: number) => {
                     const color = isRagChart
                       ? (RAG_COLOR_MAP[entry.name] || CHART_COLORS[i % CHART_COLORS.length])
                       : ((def.colors && def.colors[i]) || CHART_COLORS[i % CHART_COLORS.length]);
@@ -164,7 +221,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
         })()}
         {def.type === "radar" && (
           <ResponsiveContainer width="100%" height="100%">
-            <RadarChart data={def.data} outerRadius="75%">
+            <RadarChart data={filteredData} outerRadius="75%">
               <PolarGrid stroke="rgba(255,255,255,0.1)" />
               <PolarAngleAxis dataKey={def.xKey} tick={{ fontSize: 10, fill: "#a1a1aa" }} />
               {def.series.map((s) => (
@@ -176,7 +233,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
         )}
         {def.type === "composed" && (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={def.data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis yAxisId="main" tick={tickFill} tickFormatter={fmt} width={70} />

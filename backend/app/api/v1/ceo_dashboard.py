@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import date, datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,8 @@ from ...schemas import (
     BulkImportRequest, MarketingMetricsResponse, StoreStaffResponse,
     InternationalStoreResponse, StrategicInsightResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ceo-dashboard", tags=["ceo-dashboard"])
 
@@ -457,7 +460,9 @@ async def ceo_sheets_data(
                 "store_dashboard": await _get_store_dashboard_snap(db),
             }
     except Exception as e:
-        return {"error": str(e)}
+        logger.exception("ceo_sheets_data failed")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Failed to load dashboard data")
 
 
 async def _get_ops_data(db: AsyncSession) -> list[dict]:

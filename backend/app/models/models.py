@@ -537,6 +537,50 @@ class AISummaryConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# ── Tele Call Leads (from TL Google Sheets) ─────────────────────────
+class TeleCallLead(Base):
+    __tablename__ = "tele_call_leads"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sheet_tl_name = Column(String(100), nullable=False, index=True)
+    person_calling = Column(String(100), default="")
+    lead_source = Column(String(100), default="")
+    created_time = Column(String(50), default="")
+    full_name = Column(String(200), default="")
+    phone = Column(String(30), default="")
+    email = Column(String(200), default="")
+    status = Column(String(50), default="")
+    call_date = Column(String(30), default="")
+    appointment_date = Column(String(30), default="")
+    remarks = Column(Text, default="")
+    sale_amount = Column(String(50), default="")
+    product = Column(String(200), default="")
+    salesperson = Column(String(100), default="")
+    edited_by_user = Column(Boolean, default=False)
+    spreadsheet_id = Column(String(200), default="")
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_tele_leads_tl_status", "sheet_tl_name", "status"),
+    )
+
+
+# ── Tele Sheet Assignments (user → city sheet mapping) ─────────────
+class TeleSheetAssignment(Base):
+    __tablename__ = "tele_sheet_assignments"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    sheet_tl_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "sheet_tl_name"),
+    )
+
+
 class AISummaryRun(Base):
     __tablename__ = "ai_summary_run"
     id = Column(Integer, primary_key=True, autoincrement=True)

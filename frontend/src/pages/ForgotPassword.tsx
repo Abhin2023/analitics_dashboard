@@ -3,17 +3,33 @@ import { Link } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/apiClient";
 import {
-  ShieldCheck, Mail, ArrowLeft, CheckCircle2, Loader2, AlertCircle,
+  ShieldCheck, Mail, ArrowLeft, CheckCircle2, Loader2, AlertCircle, KeyRound, Copy, ExternalLink,
 } from "lucide-react";
+
+interface ForgotResponse {
+  message: string;
+  reset_url?: string;
+  token?: string;
+}
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [resetResult, setResetResult] = useState<ForgotResponse | null>(null);
+  const [copied, setCopied] = useState(false);
+
   const mutation = useMutation({
     mutationFn: (data: { email: string }) =>
-      api.post("/auth/forgot-password", data),
-    onSuccess: () => setSent(true),
+      api.post<ForgotResponse>("/auth/forgot-password", data),
+    onSuccess: (data) => setResetResult(data),
   });
+
+  const copyLink = async () => {
+    if (resetResult?.reset_url) {
+      await navigator.clipboard.writeText(window.location.origin + resetResult.reset_url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div
@@ -27,14 +43,12 @@ export default function ForgotPassword() {
         position: "relative",
       }}
     >
-      {/* Background decorative blobs */}
       <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
         <div style={{ position: "absolute", top: "-20%", left: "-20%", width: "60%", height: "60%", background: "radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)", borderRadius: "50%" }} />
         <div style={{ position: "absolute", bottom: "-20%", right: "-20%", width: "60%", height: "60%", background: "radial-gradient(circle, rgba(168,85,247,0.08) 0%, transparent 70%)", borderRadius: "50%" }} />
       </div>
 
       <div style={{ position: "relative", width: "100%", maxWidth: "480px", margin: "0 auto", zIndex: 10 }}>
-        {/* Logo Section */}
         <div style={{ textAlign: "center", marginBottom: "40px" }}>
           <div style={{ display: "inline-block", position: "relative", marginBottom: "20px" }}>
             <div
@@ -78,11 +92,10 @@ export default function ForgotPassword() {
             Reset Password
           </h1>
           <p style={{ color: "#94a3b8", fontSize: "14px" }}>
-            Enter your email to receive recovery instructions
+            Enter your email to get a password reset link
           </p>
         </div>
 
-        {/* Form Card */}
         <div
           style={{
             background: "rgba(30, 41, 59, 0.7)",
@@ -93,7 +106,7 @@ export default function ForgotPassword() {
             boxShadow: "0 25px 50px rgba(0,0,0,0.4)",
           }}
         >
-          {sent ? (
+          {resetResult ? (
             <div style={{ textAlign: "center", padding: "16px 0" }}>
               <div
                 style={{
@@ -112,13 +125,89 @@ export default function ForgotPassword() {
                 <CheckCircle2 size={32} />
               </div>
               <h3 style={{ fontSize: "20px", fontWeight: 600, color: "#f1f5f9", marginBottom: "12px" }}>
-                Reset Link Sent
+                Reset Link Generated
               </h3>
               <p style={{ fontSize: "14px", color: "#94a3b8", lineHeight: 1.6, marginBottom: "24px" }}>
-                If an account exists for{" "}
-                <span style={{ color: "#f1f5f9", fontWeight: 500 }}>{email}</span>,
-                a password reset link has been dispatched.
+                Use the link below to set a new password for{" "}
+                <span style={{ color: "#f1f5f9", fontWeight: 500 }}>{email}</span>.
               </p>
+
+              {resetResult.reset_url && (
+                <div style={{ marginBottom: "24px" }}>
+                  <div
+                    style={{
+                      background: "rgba(15, 23, 42, 0.6)",
+                      border: "1px solid rgba(148, 163, 184, 0.2)",
+                      borderRadius: "12px",
+                      padding: "14px 16px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      marginBottom: "16px",
+                    }}
+                  >
+                    <KeyRound size={16} style={{ color: "#60a5fa", flexShrink: 0 }} />
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        color: "#cbd5e1",
+                        fontFamily: "monospace",
+                        wordBreak: "break-all",
+                        textAlign: "left",
+                        flex: 1,
+                      }}
+                    >
+                      {window.location.origin}{resetResult.reset_url}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                    <button
+                      onClick={copyLink}
+                      style={{
+                        background: "rgba(59,130,246,0.15)",
+                        border: "1px solid rgba(59,130,246,0.3)",
+                        borderRadius: "12px",
+                        padding: "10px 20px",
+                        color: "#60a5fa",
+                        fontWeight: 600,
+                        fontSize: "14px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      <Copy size={16} />
+                      {copied ? "Copied!" : "Copy Link"}
+                    </button>
+                    <Link
+                      to={resetResult.reset_url}
+                      style={{
+                        background: "linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%)",
+                        border: "none",
+                        borderRadius: "12px",
+                        padding: "10px 20px",
+                        color: "#fff",
+                        fontWeight: 600,
+                        fontSize: "14px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        textDecoration: "none",
+                        transition: "all 0.2s",
+                        boxShadow: "0 4px 16px rgba(59,130,246,0.3)",
+                      }}
+                    >
+                      <ExternalLink size={16} />
+                      Reset Now
+                    </Link>
+                  </div>
+                </div>
+              )}
+
               <Link
                 to="/login"
                 style={{
@@ -141,7 +230,6 @@ export default function ForgotPassword() {
                 mutation.mutate({ email });
               }}
             >
-              {/* Email Field */}
               <div style={{ marginBottom: "28px" }}>
                 <label
                   htmlFor="forgot-email"
@@ -200,7 +288,6 @@ export default function ForgotPassword() {
                 </div>
               </div>
 
-              {/* Error */}
               {mutation.isError && (
                 <div
                   style={{
@@ -221,7 +308,6 @@ export default function ForgotPassword() {
                 </div>
               )}
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 id="forgot-submit"
@@ -249,14 +335,13 @@ export default function ForgotPassword() {
                 {mutation.isPending ? (
                   <>
                     <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
-                    <span>Sending Reset Link...</span>
+                    <span>Generating Reset Link...</span>
                   </>
                 ) : (
-                  <span>Send Reset Link</span>
+                  <span>Generate Reset Link</span>
                 )}
               </button>
 
-              {/* Back to Login */}
               <div style={{ textAlign: "center" }}>
                 <Link
                   to="/login"
@@ -279,7 +364,6 @@ export default function ForgotPassword() {
           )}
         </div>
 
-        {/* Footer */}
         <div style={{ textAlign: "center", marginTop: "32px" }}>
           <p style={{ color: "#64748b", fontSize: "13px" }}>
             &copy; 2026 BreakProtection Security Standard

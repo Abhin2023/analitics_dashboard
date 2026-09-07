@@ -34,7 +34,7 @@ async def login(body: LoginRequest, response: Response, db: AsyncSession = Depen
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=False,
+        secure=settings.SECURE_COOKIES,
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
     )
@@ -63,7 +63,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
         key="refresh_token",
         value=new_refresh,
         httponly=True,
-        secure=False,
+        secure=settings.SECURE_COOKIES,
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
     )
@@ -95,7 +95,7 @@ async def logout(response: Response):
 
 
 @router.post("/forgot-password")
-async def forgot_password(body: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+async def forgot_password(body: PasswordResetRequest, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if user:

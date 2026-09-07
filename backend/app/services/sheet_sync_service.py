@@ -9,11 +9,12 @@ from ..models.models import (
     StoreStaff, InternationalStore, GoogleReview, StrategicInsight,
     DailyStoreTracker, StoreDashboardSnapshot,
 )
+import secrets
 from ..core.security import hash_password
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PASSWORD_HASH = hash_password("sync-default-pw")
+DEFAULT_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
 CURRENT_MONTH = datetime.now().strftime("%Y-%m")
 TODAY = date.today()
 
@@ -370,7 +371,7 @@ class SheetSyncService:
                     email=email,
                     password_hash=DEFAULT_PASSWORD_HASH,
                     role_id=role_id,
-                    is_active=True,
+                    is_active=False,
                 )
                 db.add(user)
                 await db.flush()

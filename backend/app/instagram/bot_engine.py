@@ -1,12 +1,14 @@
 import logging
 import re
-import json
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from .models import IGAccount, IGConversation, IGMessage, IGBotSettings, AIProvider, AIUsageLog, IGComment, IGCommentRule
+from sqlalchemy import select, and_
+from .models import (
+    IGAccount, IGConversation, IGMessage, IGBotSettings,
+    AIProvider, AIUsageLog, IGComment, IGCommentRule, IGFAQ,
+)
 from .form_models import IGForm, IGFormField, IGFormSubmission
 from .graph_client import InstagramGraphClient
-from .ai_service import ai_service, parse_intent_from_response, build_form_aware_prompt
+from .ai_service import ai_service, build_system_prompt
 from .utils import decrypt_token
 from ..models.models import Lead
 from ..core.config import settings
@@ -38,21 +40,49 @@ class BotEngine:
 
     async def _get_active_forms(self, ig_account_id: int) -> list[dict]:
         result = await self.db.execute(
-            select(IGForm).where(IGForm.ig_account_id == ig_account_id, IGForm.is_active == True)
+            select(IGForm).where(
+                IGForm.ig_account_id == ig_account_id, IGForm.is_active == True
+            )
         )
         forms = result.scalars().all()
         active_forms = []
         for form in forms:
             fields_result = await self.db.execute(
-                select(IGFormField).where(IGFormField.form_id == form.id, IGFormField.phase == 1).order_by(IGFormField.sort_order)
+                select(IGFormField).where(
+                    IGFormField.form_id == form.id, IGFormField.phase == 1
+                ).order_by(IGFormField.sort_order)
             )
             fields = fields_result.scalars().all()
             active_forms.append({
-                "name": form.name,
-                "ai_prompt_hint": form.ai_prompt_hint,
+                "slug": form.name,
+                "description": form.ai_prompt_hint or form.display_name,
                 "field_keys": [f.field_key for f in fields],
             })
         return active_forms
+
+    async def _get_active_faqs(self, ig_account_id: int) -> list[dict]:
+        result = await self.db.execute(
+            select(IGFAQ).where(
+                IGFAQ.ig_account_id == ig_account_id,
+                IGFAQ.is_active == True,
+            ).order_by(IGFAQ.priority.desc()).limit(10)
+        )
+        faqs = result.scalars().all()
+        return [
+            {"question": faq.question, "answer": faq.answer, "keywords": faq.keywords or []}
+            for faq in faqs
+        ]
+
+    async def _get_triggered_forms(self, conversation_id: int) -> list[str]:
+        result = await self.db.execute(
+            select(IGForm.name).join(
+                IGFormSubmission, IGFormSubmission.form_id == IGForm.id
+            ).where(
+                IGFormSubmission.conversation_id == conversation_id,
+                IGFormSubmission.status.in_(["partial", "completed"]),
+            )
+        )
+        return [row[0] for row in result.all()]
 
     async def _get_active_submission(self, conversation_id: int) -> IGFormSubmission | None:
         result = await self.db.execute(
@@ -63,18 +93,25 @@ class BotEngine:
         )
         return result.scalar_one_or_none()
 
-    async def _process_form_answer(self, conversation: IGConversation, message_text: str, client: InstagramGraphClient, sender_id: str):
+    async def _process_form_answer(
+        self, conversation: IGConversation, message_text: str,
+        client: InstagramGraphClient, sender_id: str,
+    ):
         submission = await self._get_active_submission(conversation.id)
         if not submission:
             return False
 
-        form_result = await self.db.execute(select(IGForm).where(IGForm.id == submission.form_id))
+        form_result = await self.db.execute(
+            select(IGForm).where(IGForm.id == submission.form_id)
+        )
         form = form_result.scalar_one_or_none()
         if not form:
             return False
 
         phase1_fields_result = await self.db.execute(
-            select(IGFormField).where(IGFormField.form_id == form.id, IGFormField.phase == 1).order_by(IGFormField.sort_order)
+            select(IGFormField).where(
+                IGFormField.form_id == form.id, IGFormField.phase == 1
+            ).order_by(IGFormField.sort_order)
         )
         phase1_fields = phase1_fields_result.scalars().all()
 
@@ -100,16 +137,24 @@ class BotEngine:
                 quick_replies = [{"title": "Use my email", "payload": "USE_EMAIL"}]
 
             if quick_replies:
-                await client.send_quick_replies(sender_id, next_field.placeholder or f"Please provide your {next_field.label.lower()}:", quick_replies)
+                await client.send_quick_replies(
+                    sender_id,
+                    next_field.placeholder or f"Please provide your {next_field.label.lower()}:",
+                    quick_replies,
+                )
             else:
-                await client.send_text_message(sender_id, next_field.placeholder or f"Please provide your {next_field.label.lower()}:")
+                await client.send_text_message(
+                    sender_id,
+                    next_field.placeholder or f"Please provide your {next_field.label.lower()}:",
+                )
         else:
             if form.form_type == "two_phase":
                 submission.status = "partial"
                 link = f"{settings.FRONTEND_URL}/ig-form/{form.id}/{submission.id}"
                 await client.send_button_template(
                     sender_id,
-                    f"Thank you! Your details are saved. Please complete your {form.display_name.lower()} by selecting your options:",
+                    f"Thank you! Your details are saved. Please complete your "
+                    f"{form.display_name.lower()} by selecting your options:",
                     [{"type": "web_url", "title": "Complete Booking", "url": link}],
                 )
             else:
@@ -120,7 +165,9 @@ class BotEngine:
         await self.db.flush()
         return True
 
-    async def _create_lead_from_submission(self, submission: IGFormSubmission, conversation: IGConversation):
+    async def _create_lead_from_submission(
+        self, submission: IGFormSubmission, conversation: IGConversation
+    ):
         data = submission.phase1_data or {}
         name = data.get("name", conversation.customer_name or conversation.ig_user_id)
         phone = data.get("phone", "")
@@ -139,9 +186,15 @@ class BotEngine:
         conversation.lead_id = lead.id
         await self.db.flush()
 
-    async def _start_form(self, form: IGForm, conversation: IGConversation, client: InstagramGraphClient, sender_id: str, pre_filled: dict = None):
+    async def _start_form(
+        self, form: IGForm, conversation: IGConversation,
+        client: InstagramGraphClient, sender_id: str,
+        pre_filled: dict = None,
+    ):
         phase1_fields_result = await self.db.execute(
-            select(IGFormField).where(IGFormField.form_id == form.id, IGFormField.phase == 1).order_by(IGFormField.sort_order)
+            select(IGFormField).where(
+                IGFormField.form_id == form.id, IGFormField.phase == 1
+            ).order_by(IGFormField.sort_order)
         )
         phase1_fields = phase1_fields_result.scalars().all()
         if not phase1_fields:
@@ -170,7 +223,8 @@ class BotEngine:
                     link = f"{settings.FRONTEND_URL}/ig-form/{form.id}/{submission.id}"
                     await client.send_button_template(
                         sender_id,
-                        f"Thank you! Your details are saved. Please complete your {form.display_name.lower()} by selecting your options:",
+                        f"Thank you! Your details are saved. Please complete your "
+                        f"{form.display_name.lower()} by selecting your options:",
                         [{"type": "web_url", "title": "Complete Booking", "url": link}],
                     )
                 else:
@@ -187,12 +241,22 @@ class BotEngine:
             quick_replies = [{"title": "Use my email", "payload": "USE_EMAIL"}]
 
         if quick_replies:
-            await client.send_quick_replies(sender_id, current_field.placeholder or f"Please provide your {current_field.label.lower()}:", quick_replies)
+            await client.send_quick_replies(
+                sender_id,
+                current_field.placeholder or f"Please provide your {current_field.label.lower()}:",
+                quick_replies,
+            )
         else:
-            await client.send_text_message(sender_id, current_field.placeholder or f"Please provide your {current_field.label.lower()}:")
+            await client.send_text_message(
+                sender_id,
+                current_field.placeholder or f"Please provide your {current_field.label.lower()}:",
+            )
         await self.db.flush()
 
-    async def handle_dm(self, ig_account: IGAccount, sender_id: str, message_text: str, sender_name: str = ""):
+    async def handle_dm(
+        self, ig_account: IGAccount, sender_id: str,
+        message_text: str, sender_name: str = "",
+    ):
         settings_result = await self.db.execute(
             select(IGBotSettings).where(IGBotSettings.ig_account_id == ig_account.id)
         )
@@ -231,7 +295,9 @@ class BotEngine:
 
             active_submission = await self._get_active_submission(conversation.id)
             if active_submission:
-                handled = await self._process_form_answer(conversation, message_text, client, sender_id)
+                handled = await self._process_form_answer(
+                    conversation, message_text, client, sender_id
+                )
                 if handled:
                     provider_info = await self.get_active_provider()
                     if provider_info:
@@ -258,7 +324,15 @@ class BotEngine:
             provider, api_key = provider_info
 
             active_forms = await self._get_active_forms(ig_account.id)
-            enhanced_prompt = build_form_aware_prompt(bot_settings.ai_system_prompt, active_forms)
+            active_faqs = await self._get_active_faqs(ig_account.id)
+            already_triggered = await self._get_triggered_forms(conversation.id)
+
+            enhanced_prompt = build_system_prompt(
+                base_prompt=bot_settings.ai_system_prompt,
+                active_forms=active_forms,
+                active_faqs=active_faqs,
+                already_triggered_forms=already_triggered,
+            )
 
             history_result = await self.db.execute(
                 select(IGMessage)
@@ -267,7 +341,13 @@ class BotEngine:
                 .limit(20)
             )
             history = list(reversed(history_result.scalars().all()))
-            messages = [{"role": "assistant" if m.direction == "outbound" else "user", "content": m.content} for m in history]
+            messages = [
+                {
+                    "role": "assistant" if m.direction == "outbound" else "user",
+                    "content": m.content,
+                }
+                for m in history
+            ]
 
             response = await ai_service.generate_response(
                 messages=messages,
@@ -277,60 +357,37 @@ class BotEngine:
                 model=provider.model_name,
             )
 
-            if response.text:
-                clean_text, intent = parse_intent_from_response(response.text)
-
-                if intent and intent.get("trigger_form") and intent.get("confidence", 0) > 0.7:
-                    form_name = intent["trigger_form"]
+            if response.reply_text:
+                if response.action == "trigger_form" and response.form_slug:
                     form_result = await self.db.execute(
-                        select(IGForm).where(IGForm.name == form_name, IGForm.is_active == True)
+                        select(IGForm).where(
+                            IGForm.name == response.form_slug,
+                            IGForm.is_active == True,
+                        )
                     )
                     form = form_result.scalar_one_or_none()
-                    if form:
-                        if clean_text:
-                            await client.send_text_message(sender_id, clean_text)
-                            outbound = IGMessage(
-                                conversation_id=conversation.id,
-                                direction="outbound",
-                                message_type="text",
-                                content=clean_text,
-                                ai_provider=provider.provider,
-                                ai_input_tokens=response.input_tokens,
-                                ai_output_tokens=response.output_tokens,
-                                ai_cost_estimate=ai_service.estimate_cost(provider.provider, response.input_tokens, response.output_tokens),
-                            )
-                            self.db.add(outbound)
 
-                        await self._start_form(
-                            form, conversation, client, sender_id,
-                            pre_filled=intent.get("pre_filled", {}),
-                        )
+                    if form and response.form_slug not in already_triggered:
+                        if response.reply_text:
+                            await client.send_text_message(sender_id, response.reply_text)
+                            self._store_outbound(
+                                conversation, response, provider,
+                                ig_account, inbound,
+                            )
+
+                        await self._start_form(form, conversation, client, sender_id)
                     else:
-                        await client.send_text_message(sender_id, clean_text)
-                        outbound = IGMessage(
-                            conversation_id=conversation.id,
-                            direction="outbound",
-                            message_type="text",
-                            content=clean_text,
-                            ai_provider=provider.provider,
-                            ai_input_tokens=response.input_tokens,
-                            ai_output_tokens=response.output_tokens,
-                            ai_cost_estimate=ai_service.estimate_cost(provider.provider, response.input_tokens, response.output_tokens),
+                        await client.send_text_message(sender_id, response.reply_text)
+                        self._store_outbound(
+                            conversation, response, provider,
+                            ig_account, inbound,
                         )
-                        self.db.add(outbound)
                 else:
-                    await client.send_text_message(sender_id, response.text)
-                    outbound = IGMessage(
-                        conversation_id=conversation.id,
-                        direction="outbound",
-                        message_type="text",
-                        content=response.text,
-                        ai_provider=provider.provider,
-                        ai_input_tokens=response.input_tokens,
-                        ai_output_tokens=response.output_tokens,
-                        ai_cost_estimate=ai_service.estimate_cost(provider.provider, response.input_tokens, response.output_tokens),
+                    await client.send_text_message(sender_id, response.reply_text)
+                    self._store_outbound(
+                        conversation, response, provider,
+                        ig_account, inbound,
                     )
-                    self.db.add(outbound)
 
                 usage_log = AIUsageLog(
                     ai_provider_id=provider.id,
@@ -339,7 +396,9 @@ class BotEngine:
                     input_tokens=response.input_tokens,
                     output_tokens=response.output_tokens,
                     model=response.model,
-                    cost_estimate=outbound.ai_cost_estimate if outbound else 0,
+                    cost_estimate=ai_service.estimate_cost(
+                        provider.provider, response.input_tokens, response.output_tokens
+                    ),
                 )
                 self.db.add(usage_log)
 
@@ -347,11 +406,34 @@ class BotEngine:
             await self.db.flush()
 
             if bot_settings.lead_qualification_enabled:
-                await self._qualify_lead(conversation, message_text, response.text if response.text else "")
+                await self._qualify_lead(
+                    conversation, message_text, response.reply_text or ""
+                )
         finally:
             await client.close()
 
-    async def handle_comment(self, ig_account: IGAccount, media_id: str, comment_id: str, username: str, text: str):
+    def _store_outbound(
+        self, conversation: IGConversation, response,
+        provider: AIProvider, ig_account: IGAccount, inbound: IGMessage,
+    ):
+        outbound = IGMessage(
+            conversation_id=conversation.id,
+            direction="outbound",
+            message_type="text",
+            content=response.reply_text,
+            ai_provider=provider.provider,
+            ai_input_tokens=response.input_tokens,
+            ai_output_tokens=response.output_tokens,
+            ai_cost_estimate=ai_service.estimate_cost(
+                provider.provider, response.input_tokens, response.output_tokens
+            ),
+        )
+        self.db.add(outbound)
+
+    async def handle_comment(
+        self, ig_account: IGAccount, media_id: str, comment_id: str,
+        username: str, text: str,
+    ):
         settings_result = await self.db.execute(
             select(IGBotSettings).where(IGBotSettings.ig_account_id == ig_account.id)
         )
@@ -398,7 +480,9 @@ class BotEngine:
                     continue
 
                 if rule.action == "moderation":
-                    if rule.trigger_words and any(w.lower() in text.lower() for w in rule.trigger_words):
+                    if rule.trigger_words and any(
+                        w.lower() in text.lower() for w in rule.trigger_words
+                    ):
                         await client.hide_comment(comment_id)
                         action_taken = "hidden"
                         break
@@ -414,8 +498,14 @@ class BotEngine:
                     provider_info = await self.get_active_provider()
                     if provider_info:
                         provider, api_key = provider_info
-                        prompt = rule.ai_prompt or bot_settings.ai_system_prompt if bot_settings else "You are a helpful representative."
-                        messages = [{"role": "user", "content": f"Comment by @{username}: {text}"}]
+                        prompt = (
+                            rule.ai_prompt or bot_settings.ai_system_prompt
+                            if bot_settings
+                            else "You are a helpful representative."
+                        )
+                        messages = [
+                            {"role": "user", "content": f"Comment by @{username}: {text}"}
+                        ]
                         response = await ai_service.generate_response(
                             messages=messages,
                             system_prompt=prompt,
@@ -423,10 +513,10 @@ class BotEngine:
                             api_key=api_key,
                             model=provider.model_name,
                         )
-                        if response.text:
-                            await client.send_private_reply(comment_id, response.text)
+                        if response.reply_text:
+                            await client.send_private_reply(comment_id, response.reply_text)
                             action_taken = "replied_dm"
-                            ai_reply_text = response.text
+                            ai_reply_text = response.reply_text
 
                             usage_log = AIUsageLog(
                                 ai_provider_id=provider.id,
@@ -434,7 +524,11 @@ class BotEngine:
                                 input_tokens=response.input_tokens,
                                 output_tokens=response.output_tokens,
                                 model=response.model,
-                                cost_estimate=ai_service.estimate_cost(provider.provider, response.input_tokens, response.output_tokens),
+                                cost_estimate=ai_service.estimate_cost(
+                                    provider.provider,
+                                    response.input_tokens,
+                                    response.output_tokens,
+                                ),
                             )
                             self.db.add(usage_log)
                     break
@@ -453,7 +547,10 @@ class BotEngine:
         self.db.add(comment_record)
         await self.db.flush()
 
-    async def _qualify_lead(self, conversation: IGConversation, user_message: str, ai_response: str):
+    async def _qualify_lead(
+        self, conversation: IGConversation,
+        user_message: str, ai_response: str,
+    ):
         combined = f"{user_message} {ai_response}".lower()
         is_lead = any(re.search(p, combined, re.IGNORECASE) for p in LEAD_SIGNALS)
         if not is_lead:
@@ -480,7 +577,9 @@ class BotEngine:
 
 
 async def poll_and_process_comments(db: AsyncSession):
-    result = await db.execute(select(IGAccount).where(IGAccount.is_active == True))
+    result = await db.execute(
+        select(IGAccount).where(IGAccount.is_active == True)
+    )
     accounts = result.scalars().all()
 
     for account in accounts:
@@ -507,6 +606,9 @@ async def poll_and_process_comments(db: AsyncSession):
                         text=comment.get("text", ""),
                     )
         except Exception as e:
-            logger.error("Comment polling error for account %s: %s", account.ig_user_id, e)
+            logger.error(
+                "Comment polling error for account %s: %s",
+                account.ig_user_id, e,
+            )
         finally:
             await client.close()
