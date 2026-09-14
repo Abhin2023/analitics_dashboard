@@ -154,45 +154,71 @@ export default function TeamLeaderDashboard() {
               Telecaller Performance
             </h3>
             {telecaller_performance.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border-subtle)]">
-                      <th className="pb-2 text-left font-semibold">Name</th>
-                      <th className="pb-2 text-right font-semibold">Leads</th>
-                      <th className="pb-2 text-right font-semibold">Converted</th>
-                      <th className="pb-2 text-right font-semibold">Appts</th>
-                      <th className="pb-2 text-right font-semibold">Conv %</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border-subtle)]">
-                    {telecaller_performance.map((t: any) => (
-                      <tr key={t.name} className="hover:bg-[var(--bg-card-hover)]">
-                        <td className="py-2.5 font-medium text-white">{t.name}</td>
-                        <td className="py-2.5 text-right text-[var(--text-secondary)]">{t.total_leads}</td>
-                        <td className="py-2.5 text-right">
-                          <span className="text-emerald-400 font-semibold">{t.converted}</span>
-                        </td>
-                        <td className="py-2.5 text-right">
-                          <span className="text-blue-400 font-semibold">{t.appointments}</span>
-                        </td>
-                        <td className="py-2.5 text-right">
-                          <span
-                            className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                            style={{
-                              backgroundColor: `${ragColor(t.conversion_pct)}15`,
-                              color: ragColor(t.conversion_pct),
-                              border: `1px solid ${ragColor(t.conversion_pct)}30`,
-                            }}
-                          >
-                            {t.conversion_pct}%
-                          </span>
-                        </td>
+              <>
+                {/* Mobile cards */}
+                <div className="md:hidden -mx-5 divide-y divide-[var(--border-subtle)]">
+                  {telecaller_performance.map((t: any) => (
+                    <div key={t.name} className="px-5 py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-white truncate">{t.name}</p>
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          {t.total_leads} leads · <span className="text-emerald-400 font-semibold">{t.converted} converted</span> · <span className="text-blue-400 font-semibold">{t.appointments} appts</span>
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold"
+                        style={{
+                          backgroundColor: `${ragColor(t.conversion_pct)}15`,
+                          color: ragColor(t.conversion_pct),
+                          border: `1px solid ${ragColor(t.conversion_pct)}30`,
+                        }}
+                      >
+                        {t.conversion_pct}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border-subtle)]">
+                        <th className="pb-2 text-left font-semibold">Name</th>
+                        <th className="pb-2 text-right font-semibold">Leads</th>
+                        <th className="pb-2 text-right font-semibold">Converted</th>
+                        <th className="pb-2 text-right font-semibold">Appts</th>
+                        <th className="pb-2 text-right font-semibold">Conv %</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border-subtle)]">
+                      {telecaller_performance.map((t: any) => (
+                        <tr key={t.name} className="hover:bg-[var(--bg-card-hover)]">
+                          <td className="py-2.5 font-medium text-white">{t.name}</td>
+                          <td className="py-2.5 text-right text-[var(--text-secondary)]">{t.total_leads}</td>
+                          <td className="py-2.5 text-right">
+                            <span className="text-emerald-400 font-semibold">{t.converted}</span>
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <span className="text-blue-400 font-semibold">{t.appointments}</span>
+                          </td>
+                          <td className="py-2.5 text-right">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                              style={{
+                                backgroundColor: `${ragColor(t.conversion_pct)}15`,
+                                color: ragColor(t.conversion_pct),
+                                border: `1px solid ${ragColor(t.conversion_pct)}30`,
+                              }}
+                            >
+                              {t.conversion_pct}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             ) : (
               <p className="text-xs text-[var(--text-muted)] text-center py-8">No telecaller data</p>
             )}

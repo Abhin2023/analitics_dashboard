@@ -15,6 +15,7 @@ _cache: dict[str, tuple[float, Any]] = {}
 _CACHE_TTL = 300  # 5 minutes
 
 MCP_COUNTRIES = [
+    {"id": 1, "name": "India"},
     {"id": 2, "name": "Oman"},
     {"id": 3, "name": "Pakistan"},
     {"id": 4, "name": "UAE"},
@@ -23,6 +24,13 @@ MCP_COUNTRIES = [
     {"id": 7, "name": "Bahrain"},
     {"id": 8, "name": "Qatar"},
 ]
+
+# get_all_branches() below sources India from the local DB (synced from
+# Google Sheets) instead of MCP, since that's still the only source for
+# walk-ins/leads/calls funnel metrics. Everything else that wants MCP data
+# for every country (e.g. the sales sync service) should use MCP_COUNTRIES
+# directly, which includes India.
+_NON_INDIA_MCP_COUNTRIES = [c for c in MCP_COUNTRIES if c["id"] != 1]
 
 
 def _now():
@@ -143,10 +151,11 @@ async def get_all_branches(db: AsyncSession) -> list[dict[str, Any]]:
                 logger.warning("Failed to fetch targets for country %d: %s", country_id, e)
                 return []
 
-        # Run stock + target fetches per country concurrently
+        # Run stock + target fetches per country concurrently (India excluded —
+        # it's sourced from the local DB via india_task above)
         stock_results, target_results = await asyncio.gather(
-            asyncio.gather(*[fetch_country_stock(c["id"]) for c in MCP_COUNTRIES]),
-            asyncio.gather(*[fetch_country_targets(c["id"]) for c in MCP_COUNTRIES]),
+            asyncio.gather(*[fetch_country_stock(c["id"]) for c in _NON_INDIA_MCP_COUNTRIES]),
+            asyncio.gather(*[fetch_country_targets(c["id"]) for c in _NON_INDIA_MCP_COUNTRIES]),
         )
 
         # Merge stock data per country
@@ -162,7 +171,7 @@ async def get_all_branches(db: AsyncSession) -> list[dict[str, Any]]:
         # 3. Build branch list from MCP target data
         branches: dict[str, dict] = {}
         for country_idx, shops in enumerate(target_results):
-            country = MCP_COUNTRIES[country_idx]
+            country = _NON_INDIA_MCP_COUNTRIES[country_idx]
             for s in shops:
                 shop_name = s.get("shop", "")
                 if not shop_name:

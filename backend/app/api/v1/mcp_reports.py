@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.deps import get_db, require_permission
+from ...core.deps import get_db, require_admin_tier
 from ...models.models import User
 from ...services.mcp_daily_sales import (
     get_daily_sales,
@@ -155,7 +155,7 @@ async def mcp_daily_sales(
     country_id: int = Query(..., description="Country ID: 1=India 2=Oman 3=Pakistan 4=UAE 5=Malaysia 6=UK 7=Bahrain 8=Qatar"),
     from_date: str = Query(..., description="Start date YYYY-MM-DD"),
     to_date: str = Query(..., description="End date YYYY-MM-DD"),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Daily-aggregated sales by store from SmartService MCP."""
     try:
@@ -172,7 +172,7 @@ async def mcp_sales_summary(
     to_date: str = Query(None),
     country_id: int = Query(None),
     shop_id: int = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Sales summary (total count, gross, discount, net) from SmartService MCP."""
     try:
@@ -187,7 +187,7 @@ async def mcp_shop_wise_sales(
     country_id: int = Query(...),
     from_date: str = Query(...),
     to_date: str = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Shop-wise sales breakdown for a single country from SmartService MCP."""
     try:
@@ -203,7 +203,7 @@ async def mcp_top_models(
     from_date: str = Query(...),
     to_date: str = Query(None),
     top_n: int = Query(10, ge=1, le=50),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Top-selling models for a country from SmartService MCP."""
     try:
@@ -217,7 +217,7 @@ async def mcp_top_models(
 async def mcp_country_comparison(
     from_date: str = Query(...),
     to_date: str = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Cross-country sales comparison normalized to USD from SmartService MCP."""
     try:
@@ -233,7 +233,7 @@ async def mcp_shop_targets(
     year: int = Query(...),
     month: str = Query(..., description="Full month name, e.g. August"),
     shop_id: int = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Per-shop target vs actual achievement from SmartService MCP."""
     try:
@@ -258,7 +258,7 @@ async def mcp_transactions(
     model_id: int = Query(None),
     customer_search: str = Query(None),
     limit: int = Query(100, ge=1, le=500),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Line-level transaction listing from SmartService MCP."""
     try:
@@ -288,7 +288,7 @@ async def mcp_stock_position(
     country_id: int = Query(None),
     shop_id: int = Query(None),
     low_stock_threshold: int = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Current stock position by shop from SmartService MCP."""
     try:
@@ -301,7 +301,7 @@ async def mcp_stock_position(
 @router.get("/stock/summary", response_model=StockSummaryResponse)
 async def mcp_stock_summary(
     country_id: int = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Stock summary with totals and low-stock items from SmartService MCP."""
     try:
@@ -316,7 +316,7 @@ async def mcp_pending_items(
     country_id: int = Query(None),
     shop_id: int = Query(None),
     include: str = Query("both", description="payment, installation, or both"),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Payment and installation pending items by shop from SmartService MCP."""
     try:
@@ -334,7 +334,7 @@ async def mcp_daybook(
     shop_id: int,
     from_date: str = Query(...),
     to_date: str = Query(None),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Per-shop daybook summary from SmartService MCP."""
     try:
@@ -348,7 +348,7 @@ async def mcp_daybook(
 @router.get("/cashbook/{shop_id}", response_model=CashbookResponse)
 async def mcp_cashbook(
     shop_id: int,
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """Per-shop cash position from SmartService MCP."""
     try:
@@ -363,7 +363,7 @@ async def mcp_cashbook(
 
 
 @router.get("/health")
-async def mcp_health(user: User = require_permission("dashboard", "view")):
+async def mcp_health(user: User = require_admin_tier()):
     """SmartService MCP health check."""
     return await smart_service.health_check()
 
@@ -390,7 +390,7 @@ class BranchResponse(BaseModel):
 @router.get("/branches", response_model=list[BranchResponse])
 async def mcp_branches(
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     """List all branches with country, targets, and stock from MCP + DB."""
     try:

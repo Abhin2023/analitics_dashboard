@@ -10,12 +10,14 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from app.core.config import settings
+from app.core.logging_config import setup_logging
 from app.api.v1.router import api_router
 from app.db.session import engine, AsyncSessionLocal
 from app.db.base import Base
 import socketio as socketio_lib
 from app.socket import sio
 
+setup_logging()
 logger = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 

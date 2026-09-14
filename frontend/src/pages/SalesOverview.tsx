@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AISummary } from "@/components/dashboard/AISummary";
 import { Filter, Store, RefreshCw } from "lucide-react";
@@ -48,7 +48,6 @@ export default function SalesOverview() {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "main";
   useSocketRefresh(["sales"]);
-  const { token } = useAuthStore();
   const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeFilter, setStoreFilter] = useState("");
@@ -57,13 +56,11 @@ export default function SalesOverview() {
   const fetchBranches = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/mcp/branches", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/mcp/branches");
       if (res.ok) setBranches(await res.json());
     } catch {}
     setLoading(false);
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchBranches(); }, [fetchBranches]);
 

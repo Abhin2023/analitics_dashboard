@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AISummary } from "@/components/dashboard/AISummary";
 import { BarChart3, Download, FileText, Filter, Loader2, Trophy } from "lucide-react";
@@ -19,7 +19,6 @@ export default function Reports() {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "main";
   useSocketRefresh(["reports"]);
-  const { token } = useAuthStore();
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,9 +28,7 @@ export default function Reports() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/ceo-dashboard/sheets-data?tab=all");
       if (res.ok) {
         const d = await res.json();
         if (!d.error) setSheetsData(d);
@@ -42,7 +39,7 @@ export default function Reports() {
       setError("Failed to load reports data");
     }
     setLoading(false);
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchSheets(); }, [fetchSheets]);
 

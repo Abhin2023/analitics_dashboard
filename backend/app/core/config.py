@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     SECURE_COOKIES: bool = False
     GOOGLE_SERVICE_ACCOUNT_JSON_PATH: str = ""
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:8001"
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:8001,http://localhost:8000,http://127.0.0.1:8000,http://0.0.0.0:8000"
     BASE_REPORTING_CURRENCY: str = "INR"
     SMARTSERVICE_MCP_URL: str = "https://smartserviceapitemp.azurewebsites.net/mcp"
     SMARTSERVICE_CLIENT_ID: str = "Abhin"

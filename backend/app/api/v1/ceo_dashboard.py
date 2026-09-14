@@ -1,10 +1,10 @@
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from ...core.deps import get_db, require_permission
+from ...core.deps import get_db, require_permission, require_admin_tier
 from ...models.models import (
     Store, User, DailySubmission, Lead, Campaign, Task, Investment,
     MarketingMetrics, StoreStaff, InternationalStore, StrategicInsight,
@@ -26,6 +26,16 @@ def _month_str(d: date) -> str:
     return d.strftime("%Y-%m")
 
 
+def _month_range(month: str) -> tuple[date, date]:
+    """Return (start_date, end_date) inclusive for a "YYYY-MM" month string."""
+    start_date = date.fromisoformat(f"{month}-01")
+    if start_date.month == 12:
+        next_month_start = date(start_date.year + 1, 1, 1)
+    else:
+        next_month_start = date(start_date.year, start_date.month + 1, 1)
+    return start_date, next_month_start - timedelta(days=1)
+
+
 async def _get_month(db: AsyncSession, month: str):
     return month
 
@@ -35,7 +45,7 @@ async def _get_month(db: AsyncSession, month: str):
 async def ceo_overview(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -45,12 +55,7 @@ async def ceo_overview(
     store_ids = [s.id for s in stores]
 
     # Revenue data for the month
-    start_date = date.fromisoformat(f"{month}-01")
-    if start_date.month == 12:
-        end_date = date.fromisoformat(f"{start_date.year + 1}-01-01")
-    else:
-        end_date = date.fromisoformat(f"{start_date.year}-{start_date.month + 1:02d}-01")
-    end_date = end_date.replace(day=1) - __import__("datetime").timedelta(days=1)
+    start_date, end_date = _month_range(month)
 
     # Store achievements
     store_achievements = []
@@ -189,7 +194,7 @@ async def ceo_overview(
 async def ceo_marketing(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -256,7 +261,7 @@ async def ceo_marketing(
 async def ceo_reviews(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -307,7 +312,7 @@ async def ceo_reviews(
 async def ceo_people(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -352,7 +357,7 @@ async def ceo_people(
 async def ceo_international(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -404,7 +409,7 @@ async def ceo_international(
 async def ceo_actions(
     month: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
     if not month:
         month = _month_str(date.today())
@@ -423,13 +428,20 @@ async def ceo_actions(
 @router.get("/sheets-data")
 async def ceo_sheets_data(
     tab: str = "all",
+    month: str = None,
+    start: str = None,
+    end: str = None,
     db: AsyncSession = Depends(get_db),
-    user: User = require_permission("dashboard", "view"),
+    user: User = require_admin_tier(),
 ):
-    """Fetch data from the database (synced from Google Sheets every 1 min)."""
+    """Fetch data from the database (synced from Google Sheets every 1 min).
+    Scoped to an explicit start/end range if given, else one calendar month
+    (month param, or the current month by default) — start/end lets the
+    frontend request a day, a quarter, or any custom range with the same
+    endpoint."""
     try:
         if tab == "ops":
-            return {"ops_data": await _get_ops_data(db)}
+            return {"ops_data": await _get_ops_data(db, month, start, end)}
         elif tab == "config":
             return {"store_config": await _get_store_config(db), "store_config_v2": await _get_store_config_v2(db)}
         elif tab == "staff":
@@ -443,12 +455,12 @@ async def ceo_sheets_data(
         elif tab == "tl_report":
             return {"tl_report": []}
         elif tab == "daily_tracker":
-            return {"daily_tracker": await _get_daily_tracker(db)}
+            return {"daily_tracker": await _get_daily_tracker(db, month, start, end)}
         elif tab == "store_dashboard_snap":
             return {"store_dashboard": await _get_store_dashboard_snap(db)}
         else:
             return {
-                "ops_data": await _get_ops_data(db),
+                "ops_data": await _get_ops_data(db, month, start, end),
                 "store_config": await _get_store_config(db),
                 "store_config_v2": await _get_store_config_v2(db),
                 "staff": await _get_staff(db),
@@ -456,7 +468,7 @@ async def ceo_sheets_data(
                 "reviews": await _get_reviews(db),
                 "gr_action_plan": await _get_gr_action_plan(db),
                 "tl_report": [],
-                "daily_tracker": await _get_daily_tracker(db),
+                "daily_tracker": await _get_daily_tracker(db, month, start, end),
                 "store_dashboard": await _get_store_dashboard_snap(db),
             }
     except Exception as e:
@@ -465,26 +477,44 @@ async def ceo_sheets_data(
         raise HTTPException(status_code=500, detail="Failed to load dashboard data")
 
 
-async def _get_ops_data(db: AsyncSession) -> list[dict]:
+def _resolve_range(month: str = None, start: str = None, end: str = None) -> tuple[date, date]:
+    if start and end:
+        return date.fromisoformat(start), date.fromisoformat(end)
+    if not month:
+        month = _month_str(date.today())
+    return _month_range(month)
+
+
+async def _get_ops_data(db: AsyncSession, month: str = None, start: str = None, end: str = None) -> list[dict]:
+    start_date, end_date = _resolve_range(month, start, end)
+    days_in_range = (end_date - start_date).days + 1
+
     result = await db.execute(
-        select(DailySubmission, Store)
+        select(DailySubmission, Store, User.name.label("tl_name"))
         .join(Store, DailySubmission.store_id == Store.id)
+        .outerjoin(User, Store.team_leader_id == User.id)
+        .where(DailySubmission.date >= start_date, DailySubmission.date <= end_date)
         .order_by(DailySubmission.date.desc())
     )
     rows = result.all()
     seen_stores: set = set()
     out = []
-    for sub, store in rows:
+    for sub, store, tl_name in rows:
         store_name = store.name
         is_first = store_name not in seen_stores
         seen_stores.add(store_name)
         out.append({
             "date": str(sub.date),
-            "tl": store_name.split(" ", 1)[0] if store_name else "",
+            "tl": tl_name or "Unassigned",
             "store": store_name,
             "country": "India",
             "revenue": float(sub.revenue or 0),
-            "monthly_target": float(store.monthly_target or 0) if is_first else 0,
+            # Store.monthly_target is a single static figure (no per-month
+            # history), so it's prorated by the requested range length and
+            # attached once per store (not once per day) — otherwise summing
+            # this field per date/store would multiply it by however many
+            # days that store appears in the range.
+            "monthly_target": float(store.monthly_target or 0) * days_in_range / 30 if is_first else 0,
             "units_sold": sub.units_sold or 0,
             "new_leads": sub.new_leads or 0,
             "active_leads": sub.active_leads or 0,
@@ -794,9 +824,13 @@ async def import_insights(
     return {"imported": count, "month": body.month}
 
 
-async def _get_daily_tracker(db: AsyncSession) -> list[dict]:
+async def _get_daily_tracker(db: AsyncSession, month: str = None, start: str = None, end: str = None) -> list[dict]:
+    start_date, end_date = _resolve_range(month, start, end)
+
     result = await db.execute(
-        select(DailyStoreTracker).order_by(DailyStoreTracker.date.desc())
+        select(DailyStoreTracker)
+        .where(DailyStoreTracker.date >= start_date, DailyStoreTracker.date <= end_date)
+        .order_by(DailyStoreTracker.date.desc())
     )
     rows = result.scalars().all()
     return [

@@ -2,9 +2,14 @@ const API_BASE = "/api/v1";
 
 class ApiClient {
   private accessToken: string | null = null;
+  private onTokenRefreshed: ((token: string) => void) | null = null;
 
   setToken(token: string | null) {
     this.accessToken = token;
+  }
+
+  setOnTokenRefreshed(cb: (token: string) => void) {
+    this.onTokenRefreshed = cb;
   }
 
   private async request<T>(
@@ -76,6 +81,36 @@ class ApiClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  /**
+   * Like fetch(), but attaches the current bearer token and silently
+   * refreshes-and-retries once on a 401. Path is relative to /api/v1.
+   * Use this instead of raw fetch() so pages don't fall out of sync
+   * with the token after a silent refresh.
+   */
+  async fetchRaw(path: string, options: RequestInit = {}): Promise<Response> {
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+    };
+    if (this.accessToken) {
+      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+
+    const doFetch = () =>
+      fetch(`${API_BASE}${path}`, { ...options, headers, credentials: "include" });
+
+    let res = await doFetch();
+    if (res.status === 401 && !path.startsWith("/auth/")) {
+      const refreshed = await this.refresh();
+      if (refreshed) {
+        headers["Authorization"] = `Bearer ${this.accessToken}`;
+        res = await doFetch();
+      } else {
+        window.location.href = "/login";
+      }
+    }
+    return res;
+  }
+
   private async refresh(): Promise<boolean> {
     try {
       const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -85,6 +120,7 @@ class ApiClient {
       if (!res.ok) return false;
       const data = await res.json();
       this.accessToken = data.access_token;
+      this.onTokenRefreshed?.(data.access_token);
       return true;
     } catch {
       return false;

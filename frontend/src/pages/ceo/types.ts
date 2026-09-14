@@ -50,7 +50,7 @@ export function ragBg(p: number): string {
 }
 
 export function formatINR(n: number): string {
-  if (n >= 10000000) return `₹${(n / 100000).toFixed(1)}L`;
+  if (n >= 10000000) return `₹${(n / 10000000).toFixed(1)}Cr`;
   if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
   if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
   return `₹${n.toLocaleString("en-IN")}`;
@@ -69,6 +69,16 @@ export function shortStore(name: string): string {
     .trim();
 }
 
+// Header/subtotal artifact rows that occasionally appear in the synced sheet.
+// Every page that aggregates OpsRecord[] should filter these out the same way,
+// otherwise different pages disagree on totals when a stray row slips in.
+const SENTINEL_TLS = new Set(["TEAM LEADER", ""]);
+const SENTINEL_STORES = new Set(["STORE NAME", ""]);
+export function isSentinelRow(r: OpsRecord): boolean {
+  return SENTINEL_TLS.has((r.tl || "").trim().toUpperCase()) ||
+    SENTINEL_STORES.has((r.store || "").trim().toUpperCase());
+}
+
 // Process opsData into TL aggregation and store achievements
 export function processOpsData(opsData: OpsRecord[]) {
   if (!opsData || opsData.length === 0) return null;
@@ -76,6 +86,7 @@ export function processOpsData(opsData: OpsRecord[]) {
   // Group by store
   const storeMap: Record<string, { revenue: number; target: number; walkins: number; sales: number; tl: string }> = {};
   for (const r of opsData) {
+    if (isSentinelRow(r)) continue;
     const key = r.store;
     if (!storeMap[key]) storeMap[key] = { revenue: 0, target: 0, walkins: 0, sales: 0, tl: r.tl };
     storeMap[key].revenue += r.revenue || 0;

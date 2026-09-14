@@ -8,6 +8,32 @@ from ...schemas import SheetSourceCreate, SheetSourceUpdate, SheetSourceResponse
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
+@router.post("/mcp")
+async def manual_mcp_sync(
+    from_date: str = None,
+    to_date: str = None,
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_permission("dashboard", "view"),
+):
+    """Pull the latest sales from MCP (SmartService) for every country,
+    including India, and persist them into mcp_daily_sales."""
+    from ...services.mcp_sync_service import sync_mcp_sales
+    return await sync_mcp_sales(db, from_date, to_date)
+
+
+@router.get("/mcp/status")
+async def mcp_sync_status(
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_permission("dashboard", "view"),
+):
+    """Last time the MCP sales sync ran, for the dashboard's sync badge."""
+    from ...models.models import Setting
+    from ...services.mcp_sync_service import LAST_SYNC_SETTING_KEY
+    result = await db.execute(select(Setting).where(Setting.key == LAST_SYNC_SETTING_KEY))
+    setting = result.scalar_one_or_none()
+    return {"last_synced_at": setting.value if setting else None}
+
+
 @router.get("/sources", response_model=list[SheetSourceResponse])
 async def list_sources(
     db: AsyncSession = Depends(get_db),

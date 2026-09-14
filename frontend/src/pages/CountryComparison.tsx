@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { Globe, RefreshCw } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend } from "recharts";
 
@@ -24,27 +24,29 @@ const COUNTRY_COLORS: Record<string, string> = {
   BAHRAIN: "#f97316",
 };
 
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export default function CountryComparison() {
-  const { token } = useAuthStore();
   const [data, setData] = useState<CountryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [fromDate, setFromDate] = useState(() => {
     const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+    return localDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
   });
-  const [toDate, setToDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [toDate, setToDate] = useState(() => localDateStr(new Date()));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/mcp/sales/country-comparison?from_date=${fromDate}&to_date=${toDate}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await api.fetchRaw(
+        `/mcp/sales/country-comparison?from_date=${fromDate}&to_date=${toDate}`
       );
       if (res.ok) setData(await res.json());
     } catch {}
     setLoading(false);
-  }, [token, fromDate, toDate]);
+  }, [fromDate, toDate]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

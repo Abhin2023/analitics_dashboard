@@ -1,11 +1,28 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from ...core.deps import get_db, require_permission, get_user_permissions
-from ...models.models import Store, User, UserStoreAccess
+from ...models.models import Store, User, UserStoreAccess, McpDailySale, Role
 from ...schemas import StoreCreate, StoreUpdate, StoreResponse
 
 router = APIRouter(prefix="/stores", tags=["stores"])
+
+
+def _to_store_response(store: Store, tl: User | None) -> StoreResponse:
+    return StoreResponse(
+        id=store.id, name=store.name, team_leader_id=store.team_leader_id,
+        team_leader_name=tl.name if tl else "",
+        currency_code=store.currency_code,
+        daily_target=float(store.daily_target),
+        monthly_target=float(store.monthly_target),
+        breakeven_revenue=float(store.breakeven_revenue),
+        profitability_target=float(store.profitability_target),
+        fixed_costs=float(store.fixed_costs),
+        variable_cost_pct=float(store.variable_cost_pct),
+        is_active=store.is_active, region=store.region or "",
+        country=store.country or "India", needs_review=store.needs_review or False,
+        created_at=store.created_at,
+    )
 
 
 @router.get("/", response_model=list[StoreResponse])
@@ -13,18 +30,30 @@ async def list_stores(
     db: AsyncSession = Depends(get_db),
     user: User = require_permission("team_leaders", "view"),
 ):
-    perms = await get_user_permissions(user, db)
-    has_full = any(p["resource"] == "team_leaders" and p["action"] == "view" for p in perms)
+    # A Team Leader's scope is their own branches (Store.team_leader_id),
+    # never the "sees everything" fallback below — that fallback is meant
+    # for admin-tier roles with no UserStoreAccess rows, but Team Leader
+    # also has the "team_leaders:view" permission (to use this page at all),
+    # which would otherwise incorrectly qualify them for "sees everything".
+    role_name = (await db.execute(select(Role.name).where(Role.id == user.role_id))).scalar_one_or_none()
 
-    if has_full and not user.store_access:
-        result = await db.execute(select(Store).order_by(Store.name))
-    else:
-        store_ids = [sa.store_id for sa in user.store_access]
-        if not store_ids:
-            return []
+    if role_name == "Team Leader":
         result = await db.execute(
-            select(Store).where(Store.id.in_(store_ids)).order_by(Store.name)
+            select(Store).where(Store.team_leader_id == user.id).order_by(Store.name)
         )
+    else:
+        perms = await get_user_permissions(user, db)
+        has_full = any(p["resource"] == "team_leaders" and p["action"] == "view" for p in perms)
+
+        if has_full and not user.store_access:
+            result = await db.execute(select(Store).order_by(Store.name))
+        else:
+            store_ids = [sa.store_id for sa in user.store_access]
+            if not store_ids:
+                return []
+            result = await db.execute(
+                select(Store).where(Store.id.in_(store_ids)).order_by(Store.name)
+            )
 
     stores = result.scalars().all()
     tl_cache = {}
@@ -34,19 +63,7 @@ async def list_stores(
             r = await db.execute(select(User).where(User.id == s.team_leader_id))
             tl_cache[s.team_leader_id] = r.scalar_one_or_none()
         tl = tl_cache.get(s.team_leader_id)
-        out.append(StoreResponse(
-            id=s.id, name=s.name, team_leader_id=s.team_leader_id,
-            team_leader_name=tl.name if tl else "",
-            currency_code=s.currency_code,
-            daily_target=float(s.daily_target),
-            monthly_target=float(s.monthly_target),
-            breakeven_revenue=float(s.breakeven_revenue),
-            profitability_target=float(s.profitability_target),
-            fixed_costs=float(s.fixed_costs),
-            variable_cost_pct=float(s.variable_cost_pct),
-            is_active=s.is_active, region=s.region or "",
-            created_at=s.created_at,
-        ))
+        out.append(_to_store_response(s, tl))
     return out
 
 
@@ -70,19 +87,7 @@ async def create_store(
     await db.refresh(store)
     r = await db.execute(select(User).where(User.id == store.team_leader_id))
     tl = r.scalar_one_or_none()
-    return StoreResponse(
-        id=store.id, name=store.name, team_leader_id=store.team_leader_id,
-        team_leader_name=tl.name if tl else "",
-        currency_code=store.currency_code,
-        daily_target=float(store.daily_target),
-        monthly_target=float(store.monthly_target),
-        breakeven_revenue=float(store.breakeven_revenue),
-        profitability_target=float(store.profitability_target),
-        fixed_costs=float(store.fixed_costs),
-        variable_cost_pct=float(store.variable_cost_pct),
-        is_active=store.is_active, region=store.region or "",
-        created_at=store.created_at,
-    )
+    return _to_store_response(store, tl)
 
 
 @router.get("/{store_id}", response_model=StoreResponse)
@@ -101,19 +106,7 @@ async def get_store(
             raise HTTPException(status_code=403, detail="No access to this store")
     r = await db.execute(select(User).where(User.id == store.team_leader_id))
     tl = r.scalar_one_or_none()
-    return StoreResponse(
-        id=store.id, name=store.name, team_leader_id=store.team_leader_id,
-        team_leader_name=tl.name if tl else "",
-        currency_code=store.currency_code,
-        daily_target=float(store.daily_target),
-        monthly_target=float(store.monthly_target),
-        breakeven_revenue=float(store.breakeven_revenue),
-        profitability_target=float(store.profitability_target),
-        fixed_costs=float(store.fixed_costs),
-        variable_cost_pct=float(store.variable_cost_pct),
-        is_active=store.is_active, region=store.region or "",
-        created_at=store.created_at,
-    )
+    return _to_store_response(store, tl)
 
 
 @router.put("/{store_id}", response_model=StoreResponse)
@@ -133,19 +126,50 @@ async def update_store(
     await db.refresh(store)
     r = await db.execute(select(User).where(User.id == store.team_leader_id))
     tl = r.scalar_one_or_none()
-    return StoreResponse(
-        id=store.id, name=store.name, team_leader_id=store.team_leader_id,
-        team_leader_name=tl.name if tl else "",
-        currency_code=store.currency_code,
-        daily_target=float(store.daily_target),
-        monthly_target=float(store.monthly_target),
-        breakeven_revenue=float(store.breakeven_revenue),
-        profitability_target=float(store.profitability_target),
-        fixed_costs=float(store.fixed_costs),
-        variable_cost_pct=float(store.variable_cost_pct),
-        is_active=store.is_active, region=store.region or "",
-        created_at=store.created_at,
+    return _to_store_response(store, tl)
+
+
+@router.post("/{store_id}/merge-into/{target_store_id}")
+async def merge_store(
+    store_id: int,
+    target_store_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_permission("team_leaders", "edit"),
+):
+    """Merge a duplicate (usually needs_review) store into an existing one:
+    re-point its mcp_daily_sales rows to the target store, then delete it."""
+    if store_id == target_store_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a store into itself")
+    result = await db.execute(select(Store).where(Store.id == store_id))
+    store = result.scalar_one_or_none()
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    result = await db.execute(select(Store).where(Store.id == target_store_id))
+    target = result.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Target store not found")
+
+    # Drop any mcp_daily_sales rows the target already has for the same dates
+    # (unique constraint on store_id+date would otherwise block the re-point).
+    existing_dates_result = await db.execute(
+        select(McpDailySale.date).where(McpDailySale.store_id == target_store_id)
     )
+    existing_dates = {row[0] for row in existing_dates_result.all()}
+    dup_result = await db.execute(
+        select(McpDailySale).where(
+            McpDailySale.store_id == store_id, McpDailySale.date.in_(existing_dates)
+        )
+    )
+    for dup in dup_result.scalars().all():
+        await db.delete(dup)
+    await db.flush()
+
+    await db.execute(
+        update(McpDailySale).where(McpDailySale.store_id == store_id).values(store_id=target_store_id)
+    )
+    await db.delete(store)
+    await db.commit()
+    return {"message": f"Merged store {store_id} into {target_store_id}"}
 
 
 @router.delete("/{store_id}")

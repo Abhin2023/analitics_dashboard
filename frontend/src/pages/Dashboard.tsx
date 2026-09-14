@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import {
   DollarSign, Target, TrendingUp, Users, Phone, Briefcase, Award, AlertTriangle, PieChart as PieIcon, BarChart3,
-  Globe, Video, MessageCircle, Star, Eye, Package, Filter, MapPin, Store
+  Globe, Video, MessageCircle, Star, Eye, Package, Filter, MapPin, Store, RefreshCw
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { useSocketRefresh } from "../hooks/useSocketRefresh";
 import { AISummary } from "@/components/dashboard/AISummary";
+import { processOpsData } from "@/pages/ceo/types";
 import {
   CardFilterPopover,
   CardFilterState,
@@ -25,7 +26,6 @@ import {
 const BranchGlobe = lazy(() => import("@/components/dashboard/BranchGlobe"));
 
 const COLORS = ["#3b82f6", "#10b981", "#a855f7", "#f97316", "#ec4899", "#06b6d4"];
-const TL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#06b6d4", "#f97316"];
 
 function shortStore(name: string) {
   return name.replace("Kerala ", "").replace("Chennai ", "").replace("Bangalore ", "")
@@ -33,12 +33,53 @@ function shortStore(name: string) {
     .replace("Delhi ", "").replace(" Lajpat Nagar", "").replace(" Mall", "").trim();
 }
 
-function pct(a: number, t: number) { return t > 0 ? Math.round(a / t * 100) : 0; }
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function startOfLocalMonth() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
 function ragColor(p: number) { return p >= 65 ? "#10b981" : p >= 35 ? "#f59e0b" : "#ef4444"; }
 function fmtINR(n: number) {
   if (n >= 100000) return `\u20b9${(n / 100000).toFixed(1)}L`;
   if (n >= 1000) return `\u20b9${(n / 1000).toFixed(1)}K`;
   return `\u20b9${n.toLocaleString("en-IN")}`;
+}
+// Each country's own currency, not a flat USD/$ — matches the symbols used
+// on the Sales Overview page for the same branch data.
+function fmtByCountry(n: number, country: string) {
+  switch (country) {
+    case "India": {
+      if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
+      if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+      return `₹${(n / 1000).toFixed(0)}K`;
+    }
+    case "UAE": return `AED ${(n / 1000).toFixed(0)}K`;
+    case "Oman": return `OMR ${(n / 1000).toFixed(0)}K`;
+    case "Qatar": return `QAR ${(n / 1000).toFixed(0)}K`;
+    case "Pakistan": return `PKR ${(n / 100000).toFixed(1)}L`;
+    case "Malaysia": return `MYR ${(n / 1000).toFixed(0)}K`;
+    case "UK": return `£${(n / 1000).toFixed(0)}K`;
+    case "Bahrain": return `BHD ${(n / 1000).toFixed(0)}K`;
+    default: return `${(n / 1000).toFixed(0)}K`;
+  }
+}
+// Same idea, keyed by ISO-ish currency code instead of country name — the
+// MCP country-comparison data reports each country's own local_currency
+// code directly (INR, AED, OMR, QAR...) rather than a country string.
+function fmtByCurrency(n: number, currency: string) {
+  switch (currency) {
+    case "INR": {
+      if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
+      if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+      return `₹${(n / 1000).toFixed(1)}K`;
+    }
+    case "GBP": return `£${(n / 1000).toFixed(1)}K`;
+    case "PKR": return `PKR ${(n / 100000).toFixed(1)}L`;
+    default: return `${currency} ${(n / 1000).toFixed(1)}K`;
+  }
 }
 function fmtNum(n: number) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -46,55 +87,10 @@ function fmtNum(n: number) {
   return String(n);
 }
 
-function processOpsData(opsData: any[]) {
-  if (!opsData || opsData.length === 0) return null;
-  const storeMap: Record<string, { revenue: number; target: number; walkins: number; sales: number; tl: string }> = {};
-  for (const r of opsData) {
-    const key = r.store;
-    if (!storeMap[key]) storeMap[key] = { revenue: 0, target: 0, walkins: 0, sales: 0, tl: r.tl };
-    storeMap[key].revenue += r.revenue || 0;
-    storeMap[key].target += r.monthly_target || 0;
-    storeMap[key].walkins += r.walk_ins || 0;
-    storeMap[key].sales += r.walk_in_conversions || 0;
-    storeMap[key].tl = r.tl;
-  }
-  const storeAchievements = Object.entries(storeMap).map(([store, d]) => ({
-    store, tl: d.tl, mtd: d.revenue, target: d.target,
-    achPct: pct(d.revenue, d.target), walkins: d.walkins, sales: d.sales,
-    convPct: d.walkins > 0 ? Math.round(d.sales / d.walkins * 100) : 0,
-  })).sort((a: any, b: any) => b.achPct - a.achPct);
-
-  const tlMap: Record<string, { target: number; achieved: number; walkins: number; conv: number; stores: string[] }> = {};
-  for (const sa of storeAchievements) {
-    const tl = sa.tl;
-    if (!tlMap[tl]) tlMap[tl] = { target: 0, achieved: 0, walkins: 0, conv: 0, stores: [] };
-    tlMap[tl].target += sa.target;
-    tlMap[tl].achieved += sa.mtd;
-    tlMap[tl].walkins += sa.walkins;
-    tlMap[tl].conv += sa.sales;
-    tlMap[tl].stores.push(sa.store);
-  }
-  const tlList = Object.entries(tlMap).map(([name, d], i) => ({
-    name, ...d, achPct: pct(d.achieved, d.target),
-    convPct: d.walkins > 0 ? Math.round(d.conv / d.walkins * 100) : 0,
-    color: TL_COLORS[i % TL_COLORS.length],
-  })).sort((a: any, b: any) => b.achPct - a.achPct);
-
-  const totalRevenue = storeAchievements.reduce((s, sa) => s + sa.mtd, 0);
-  const totalTarget = storeAchievements.reduce((s, sa) => s + sa.target, 0);
-  const totalWalkins = storeAchievements.reduce((s, sa) => s + sa.walkins, 0);
-  const totalConversions = storeAchievements.reduce((s, sa) => s + sa.sales, 0);
-  const rag = { green: 0, amber: 0, red: 0 };
-  for (const sa of storeAchievements) { if (sa.achPct >= 65) rag.green++; else if (sa.achPct >= 35) rag.amber++; else rag.red++; }
-
-  return { storeAchievements, tlList, totalRevenue, totalTarget, totalWalkins, totalConversions, overallAch: pct(totalRevenue, totalTarget), overallConv: totalWalkins > 0 ? Math.round(totalConversions / totalWalkins * 100) : 0, rag };
-}
-
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "dashboard";
   useSocketRefresh(["sheets-data"]);
-  const { token } = useAuthStore();
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [sheetsLoading, setSheetsLoading] = useState(true);
   const [sheetsError, setSheetsError] = useState("");
@@ -110,14 +106,48 @@ export default function Dashboard() {
   const [branchesData, setBranchesData] = useState<any[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesExpanded, setBranchesExpanded] = useState<Set<string>>(new Set());
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [period, setPeriod] = useState<"7day" | "month" | "6month" | "1year" | "custom">("month");
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [showRangeFilter, setShowRangeFilter] = useState(false);
+  const [draftRange, setDraftRange] = useState({ from: "", to: "" });
+  const rangeFilterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showRangeFilter) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (rangeFilterRef.current && !rangeFilterRef.current.contains(e.target as Node)) {
+        setShowRangeFilter(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showRangeFilter]);
+
+  // The single date range driving every section of the dashboard (KPIs,
+  // trend, breakdowns, MCP-live sections) — a rolling window ending today
+  // for the presets, or whatever the user picked for Custom.
+  const effectiveRange = useMemo(() => {
+    const now = new Date();
+    const to = localDateStr(now);
+    if (period === "custom" && customRange) return customRange;
+    const from = new Date(now);
+    if (period === "7day") from.setDate(from.getDate() - 6);
+    else if (period === "6month") from.setMonth(from.getMonth() - 6);
+    else if (period === "1year") from.setFullYear(from.getFullYear() - 1);
+    else from.setMonth(from.getMonth() - 1); // "month" default: rolling 30 days
+    return { from: localDateStr(from), to };
+  }, [period, customRange]);
 
   const fetchSheets = useCallback(async () => {
     setSheetsLoading(true);
     setSheetsError("");
     try {
-      const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw(
+        `/ceo-dashboard/sheets-data?tab=all&start=${effectiveRange.from}&end=${effectiveRange.to}`
+      );
       if (res.ok) {
         const d = await res.json();
         if (!d.error) setSheetsData(d);
@@ -128,67 +158,87 @@ export default function Dashboard() {
       setSheetsError("Failed to load dashboard data");
     }
     setSheetsLoading(false);
-  }, [token]);
+  }, [effectiveRange]);
 
   const fetchMcpLive = useCallback(async () => {
     setMcpLiveLoading(true);
     try {
-      const now = new Date();
-      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-      const to = now.toISOString().split("T")[0];
-      const res = await fetch(
-        `/api/v1/mcp/sales/daily?country_id=4&from_date=${from}&to_date=${to}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await api.fetchRaw(
+        `/mcp/sales/daily?country_id=4&from_date=${effectiveRange.from}&to_date=${effectiveRange.to}`
       );
       if (res.ok) setMcpLiveData(await res.json());
     } catch {}
     setMcpLiveLoading(false);
-  }, [token]);
+  }, [effectiveRange]);
 
   const fetchCountryComparison = useCallback(async () => {
     setCountryLoading(true);
     try {
-      const now = new Date();
-      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-      const to = now.toISOString().split("T")[0];
-      const res = await fetch(
-        `/api/v1/mcp/sales/country-comparison?from_date=${from}&to_date=${to}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await api.fetchRaw(
+        `/mcp/sales/country-comparison?from_date=${effectiveRange.from}&to_date=${effectiveRange.to}`
       );
       if (res.ok) setCountryData(await res.json());
     } catch {}
     setCountryLoading(false);
-  }, [token]);
+  }, [effectiveRange]);
 
   const fetchStock = useCallback(async () => {
     setStockLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/mcp/stock/position?country_id=${stockCountryId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await api.fetchRaw(`/mcp/stock/position?country_id=${stockCountryId}`);
       if (res.ok) setStockData(await res.json());
     } catch {}
     setStockLoading(false);
-  }, [token, stockCountryId]);
+  }, [stockCountryId]);
 
   const fetchBranches = useCallback(async () => {
     setBranchesLoading(true);
     try {
-      const res = await fetch("/api/v1/mcp/branches", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/mcp/branches");
       if (res.ok) setBranchesData(await res.json());
     } catch {}
     setBranchesLoading(false);
-  }, [token]);
+  }, []);
+
+  const fetchSyncStatus = useCallback(async () => {
+    try {
+      const res = await api.fetchRaw("/sync/mcp/status");
+      if (res.ok) {
+        const d = await res.json();
+        setLastSyncedAt(d.last_synced_at || null);
+      }
+    } catch {}
+  }, []);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncError("");
+    try {
+      const res = await api.fetchRaw("/sync/mcp", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Sync failed");
+      }
+      await Promise.all([
+        fetchMcpLive(),
+        fetchCountryComparison(),
+        fetchBranches(),
+        fetchStock(),
+        fetchSyncStatus(),
+      ]);
+    } catch (e: any) {
+      setSyncError(e.message || "Sync failed");
+    }
+    setSyncing(false);
+  }, [fetchMcpLive, fetchCountryComparison, fetchBranches, fetchStock, fetchSyncStatus]);
 
   useEffect(() => {
     fetchSheets();
     fetchMcpLive();
     fetchCountryComparison();
     fetchBranches();
-  }, [fetchSheets, fetchMcpLive, fetchCountryComparison, fetchBranches]);
+    fetchSyncStatus();
+  }, [fetchSheets, fetchMcpLive, fetchCountryComparison, fetchBranches, fetchSyncStatus]);
 
   useEffect(() => {
     fetchStock();
@@ -200,7 +250,7 @@ export default function Dashboard() {
   const ops = processOpsData(activeData?.ops_data || []);
 
   // Today's live revenue from MCP
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = localDateStr(new Date());
   const todayLiveRevenue = useMemo(() => {
     return mcpLiveData
       .filter((r: any) => r.date === todayStr)
@@ -216,20 +266,48 @@ export default function Dashboard() {
     return { totalRevenue, totalTarget, achievementPct };
   }, [ops]);
 
-  // Revenue trend from ops_data grouped by date
+  // Revenue vs Target vs Achieved trend from ops_data grouped by date, across
+  // all branches. kpiData.totalTarget is already the correct total target
+  // for the selected range (the backend prorates each store's static
+  // monthly_target by the range length), so the daily pace is just that
+  // total divided evenly across the days in the range.
   const revenueTrend = useMemo(() => {
     const opsData = activeData?.ops_data || [];
-    if (!opsData.length) return [];
+    if (!kpiData) return [];
     const dateMap: Record<string, number> = {};
     for (const r of opsData) {
       if (r.date) {
         dateMap[r.date] = (dateMap[r.date] || 0) + (r.revenue || 0);
       }
     }
-    return Object.entries(dateMap)
-      .map(([date, revenue]) => ({ date, revenue }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [activeData]);
+    // Walk every day in the selected range, not just the days that had a
+    // submission — otherwise a sparsely-synced period (e.g. one real day out
+    // of a whole month) renders as an isolated dot with no line to connect it.
+    const dates: string[] = [];
+    const cursor = new Date(effectiveRange.from);
+    const end = new Date(effectiveRange.to);
+    while (cursor <= end) {
+      dates.push(localDateStr(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (!dates.length) return [];
+    const dailyTarget = kpiData.totalTarget / Math.max(dates.length, 1);
+    // Achieved % as a running cumulative-to-date attainment curve, not the
+    // same day's revenue rescaled against a flat target — otherwise it just
+    // traces the same shape as the Revenue line and the two are impossible
+    // to tell apart on the chart.
+    let cumRevenue = 0;
+    let cumTarget = 0;
+    return dates.map((date) => {
+      const revenue = dateMap[date] || 0;
+      cumRevenue += revenue;
+      cumTarget += dailyTarget;
+      return {
+        date, revenue, target: dailyTarget,
+        achievedPct: cumTarget > 0 ? Math.round((cumRevenue / cumTarget) * 100) : 0,
+      };
+    });
+  }, [activeData, kpiData, effectiveRange]);
 
   // Revenue breakdown by TL from ops_data
   const revenueBreakdown = useMemo(() => {
@@ -280,6 +358,9 @@ export default function Dashboard() {
     const tracker = activeData?.daily_tracker || [];
     if (!tracker.length) return null;
 
+    // tracker rows are ordered by date desc, so the first row seen per store
+    // is its latest snapshot — mtd_revenue is already a cumulative running
+    // total as of that date, so it must be read once, never summed across days.
     const storeMap: Record<string, any> = {};
     for (const r of tracker) {
       const s = r.store;
@@ -287,7 +368,7 @@ export default function Dashboard() {
       if (!storeMap[s]) {
         storeMap[s] = {
           store: s, country: r.country, storeType: r.store_type,
-          dailyRevenue: 0, mtdRevenue: 0, monthlyTarget: 0, unitsSold: 0, carePlus: 0, prebookings: 0,
+          dailyRevenue: 0, mtdRevenue: r.mtd_revenue || 0, monthlyTarget: r.monthly_target || 0, unitsSold: 0, carePlus: 0, prebookings: 0,
           igVideos: 0, igViewsTarget: 0, igViewsAchieved: 0, igFollowers: 0, igNewFollowers: 0,
           igLikes: 0, igComments: 0, igSaves: 0, igShares: 0, igDms: 0, igPosts: 0,
           ytViews: 0, ytLikes: 0, ytComments: 0,
@@ -299,8 +380,6 @@ export default function Dashboard() {
       }
       const m = storeMap[s];
       m.dailyRevenue += r.daily_revenue || 0;
-      m.mtdRevenue += r.mtd_revenue || 0;
-      m.monthlyTarget = r.monthly_target || m.monthlyTarget;
       m.unitsSold += r.units_sold || 0;
       m.carePlus += r.care_plus_attached || 0;
       m.prebookings += r.prebookings || 0;
@@ -388,17 +467,132 @@ export default function Dashboard() {
 
         {tab === "dashboard" && (
           <div className="space-y-6 w-full min-w-0">
+            {/* Period header */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-white">
+                  {new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
+                </h2>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Today: {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                  {" · "}Showing {effectiveRange.from} to {effectiveRange.to}
+                </p>
+              </div>
+            </div>
+
+            {/* MCP Sync Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] p-3 rounded-2xl">
+              <div className="text-xs text-[var(--text-muted)]">
+                {lastSyncedAt
+                  ? `Sales data last synced from MCP: ${new Date(lastSyncedAt).toLocaleString()}`
+                  : "Sales data has not been synced from MCP yet"}
+                {syncError && <span className="ml-2 text-rose-400">{syncError}</span>}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center rounded-xl border border-[var(--border-subtle)] bg-white/5 p-0.5">
+                  {([
+                    { key: "7day", label: "7 Days" },
+                    { key: "month", label: "Month" },
+                    { key: "6month", label: "6 Month" },
+                    { key: "1year", label: "1 Year" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => setPeriod(opt.key)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                        period === opt.key
+                          ? "bg-[var(--accent-blue)] text-white"
+                          : "text-[var(--text-secondary)] hover:text-white"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative" ref={rangeFilterRef}>
+                  <button
+                    onClick={() => {
+                      setDraftRange(period === "custom" && customRange ? customRange : effectiveRange);
+                      setShowRangeFilter((v) => !v);
+                    }}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition ${
+                      period === "custom"
+                        ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                        : "bg-white/5 border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-white/10"
+                    }`}
+                  >
+                    <Filter size={14} />
+                    Custom
+                  </button>
+                  {showRangeFilter && (
+                    <div className="absolute right-0 mt-2 w-72 rounded-xl bg-[#11131e] border border-[var(--border-subtle)] shadow-2xl p-4 z-50 text-xs space-y-3">
+                      <p className="font-semibold text-white">Custom date range</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-[10px] text-[var(--text-muted)] block mb-0.5">From</span>
+                          <input
+                            type="date"
+                            value={draftRange.from}
+                            onChange={(e) => setDraftRange((p) => ({ ...p, from: e.target.value }))}
+                            className="w-full bg-[var(--bg-primary)] border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-[var(--text-muted)] block mb-0.5">To</span>
+                          <input
+                            type="date"
+                            value={draftRange.to}
+                            onChange={(e) => setDraftRange((p) => ({ ...p, to: e.target.value }))}
+                            className="w-full bg-[var(--bg-primary)] border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-1">
+                        <button
+                          onClick={() => { setPeriod("month"); setCustomRange(null); setShowRangeFilter(false); }}
+                          className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[var(--text-secondary)]"
+                        >
+                          Reset
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (draftRange.from && draftRange.to) {
+                              setCustomRange(draftRange);
+                              setPeriod("custom");
+                            }
+                            setShowRangeFilter(false);
+                          }}
+                          disabled={!draftRange.from || !draftRange.to}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 transition disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={syncing ? "animate-spin" : ""} />
+                  {syncing ? "Syncing..." : "Sync Latest Sales"}
+                </button>
+              </div>
+            </div>
+
             {/* KPI Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 min-w-0">
               {activeLoading
             ? Array.from({ length: 6 }).map((_, i) => <StatCardSkeleton key={i} />)
-            : kpiCards.map((card, i) => <StatCard key={i} {...card} enableFilter={true} />)}
+            : kpiCards.map((card, i) => <StatCard key={i} {...card} />)}
         </div>
 
-        {ops && (
+        {branchesData.length > 0 && (
           <ErrorBoundary>
             <Suspense fallback={<div className="h-[480px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] animate-pulse" />}>
-              <BranchGlobe stores={ops.storeAchievements} />
+              <BranchGlobe branches={branchesData} />
             </Suspense>
           </ErrorBoundary>
         )}
@@ -422,7 +616,7 @@ export default function Dashboard() {
                     </span>
                   )}
                 </h3>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">30-day breakdown of daily revenue logs</p>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Daily revenue, target pace, and cumulative achievement % across all branches</p>
               </div>
               <CardFilterPopover
                 filter={trendFilter}
@@ -430,16 +624,43 @@ export default function Dashboard() {
               />
             </div>
             {sheetsLoading ? (
-              <div className="h-64 sm:h-72 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
+              <div className="h-72 sm:h-80 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
             ) : (
-              <div className="h-64 sm:h-72 w-full min-w-0">
+              <div className="h-72 sm:h-80 w-full min-w-0">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={applyCardFilter(revenueTrend, trendFilter)} margin={{ top: 10, right: 15, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <LineChart data={applyCardFilter(revenueTrend, trendFilter)} margin={{ top: 12, right: 15, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" />
                     <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#a1a1aa" }} tickFormatter={(v) => String(v).slice(5)} />
-                    <YAxis tick={{ fontSize: 11, fill: "#a1a1aa" }} width={45} />
-                    <Tooltip contentStyle={{ backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px", color: "#fff" }} labelStyle={{ color: "#a1a1aa", fontWeight: 600 }} />
-                    <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} dot={{ r: 3, fill: "#3b82f6" }} activeDot={{ r: 6 }} />
+                    <YAxis
+                      yAxisId="amount" domain={["auto", "auto"]} width={48}
+                      tick={{ fontSize: 11, fill: "#93c5fd" }} tickFormatter={(v) => fmtINR(v)}
+                    />
+                    <YAxis
+                      yAxisId="pct" orientation="right" domain={[0, "auto"]} width={42}
+                      tick={{ fontSize: 11, fill: "#fbbf24" }} tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.15)", borderRadius: "12px", fontSize: "12px", color: "#fff" }}
+                      labelStyle={{ color: "#e5e7eb", fontWeight: 700, marginBottom: 4 }}
+                      itemStyle={{ fontWeight: 600 }}
+                      formatter={(value: any, name?: any) => (name === "Achieved %" ? [`${value}%`, name] : [fmtINR(Number(value)), name])}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12, fontWeight: 600, color: "#e5e7eb", paddingTop: 8 }} iconType="line" />
+                    <Line
+                      yAxisId="amount" type="monotone" dataKey="revenue" name="Revenue"
+                      stroke="#3b82f6" strokeWidth={3.5}
+                      dot={{ r: 4, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 7 }}
+                    />
+                    <Line
+                      yAxisId="amount" type="monotone" dataKey="target" name="Target"
+                      stroke="#10b981" strokeWidth={3.5}
+                      dot={{ r: 4, fill: "#10b981", strokeWidth: 0 }} activeDot={{ r: 7 }}
+                    />
+                    <Line
+                      yAxisId="pct" type="monotone" dataKey="achievedPct" name="Achieved %"
+                      stroke="#f59e0b" strokeWidth={3.5}
+                      dot={{ r: 4, fill: "#f59e0b", strokeWidth: 0 }} activeDot={{ r: 7 }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -449,7 +670,7 @@ export default function Dashboard() {
           <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 flex flex-col justify-between min-w-0">
             <div>
               <h3 className="text-base font-bold text-white tracking-tight">Overall Achievement Rate</h3>
-              <p className="text-xs text-[var(--text-muted)] mb-4">Monthly target fulfillment gauge</p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Target fulfillment for the selected period</p>
             </div>
             {sheetsLoading ? (
               <div className="h-64 sm:h-72 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
@@ -475,9 +696,9 @@ export default function Dashboard() {
             {/* CEO KPI Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 min-w-0">
               {[
-                { label: "India MTD Revenue", value: fmtINR(ops.totalRevenue), sub: `vs ${fmtINR(ops.totalTarget)} target`, color: "#3b82f6" },
+                { label: "India Revenue", value: fmtINR(ops.totalRevenue), sub: `vs ${fmtINR(ops.totalTarget)} target`, color: "#3b82f6" },
                 { label: "India Achievement", value: `${ops.overallAch}%`, sub: `${ops.tlList.length} TLs \u00b7 ${ops.storeAchievements.length} stores`, color: ops.overallAch >= 50 ? "#10b981" : "#f59e0b" },
-                { label: "Walk-ins (Month)", value: ops.totalWalkins.toLocaleString(), sub: `${ops.totalConversions} conversions \u00b7 ${ops.overallConv}%`, color: "#10b981" },
+                { label: "Walk-ins", value: ops.totalWalkins.toLocaleString(), sub: `${ops.totalConversions} conversions \u00b7 ${ops.overallConv}%`, color: "#10b981" },
                 { label: "Critical Stores", value: String(ops.rag.red), sub: `${ops.rag.red} below 35% target`, color: "#ef4444" },
               ].map((k, i) => (
                 <div key={i} className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4 relative overflow-hidden">
@@ -617,7 +838,7 @@ export default function Dashboard() {
                 LIVE from MCP
               </span>
             </div>
-            <p className="text-xs text-[var(--text-muted)] mb-4">Cross-country sales comparison normalized to USD (current month)</p>
+            <p className="text-xs text-[var(--text-muted)] mb-4">Bars normalized to USD for comparison — figures below show each country's own currency (current month)</p>
             {countryLoading ? (
               <div className="h-[300px] rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
             ) : (
@@ -628,7 +849,10 @@ export default function Dashboard() {
                     <XAxis type="number" tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
                     <YAxis type="category" dataKey="country" width={90} tick={{ fontSize: 11, fill: "#a1a1aa" }} />
                     <Tooltip
-                      formatter={(v: any) => [`$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "USD"]}
+                      formatter={(v: any, _name: any, item: any) => [
+                        `${fmtByCurrency(item?.payload?.local_amount || 0, item?.payload?.local_currency || "")} (≈ $${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+                        "Revenue",
+                      ]}
                       contentStyle={{ backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px", color: "#fff" }}
                     />
                     <Bar dataKey="usd_amount" radius={[0, 6, 6, 0]}>
@@ -666,8 +890,9 @@ export default function Dashboard() {
                     }} />
                     <span className="text-xs font-semibold text-white">{c.country}</span>
                   </div>
-                  <p className="text-lg font-bold text-white">${c.usd_amount?.toLocaleString()}</p>
-                  <p className="text-[10px] text-[var(--text-muted)]">{c.sales_count} sales · ${c.avg_ticket_usd?.toFixed(0)} avg</p>
+                  <p className="text-lg font-bold text-white">{fmtByCurrency(c.local_amount || 0, c.local_currency || "")}</p>
+                  <p className="text-[10px] text-[var(--text-muted)]">≈ ${c.usd_amount?.toLocaleString(undefined, { maximumFractionDigits: 0 })} USD</p>
+                  <p className="text-[10px] text-[var(--text-muted)]">{c.sales_count} sales · ${c.avg_ticket_usd?.toFixed(0)} avg (USD)</p>
                 </div>
               ))}
             </div>
@@ -882,7 +1107,7 @@ export default function Dashboard() {
                             <div className="flex items-center gap-4 shrink-0">
                               <div className="text-right">
                                 <p className="text-[10px] text-[var(--text-muted)]">Target</p>
-                                <p className="text-xs font-medium text-white">{b.target > 0 ? `$${(b.target / 1000).toFixed(0)}K` : "—"}</p>
+                                <p className="text-xs font-medium text-white">{b.target > 0 ? fmtByCountry(b.target, b.country) : "—"}</p>
                               </div>
                               <div className="text-right">
                                 <p className="text-[10px] text-[var(--text-muted)]">Achieved</p>

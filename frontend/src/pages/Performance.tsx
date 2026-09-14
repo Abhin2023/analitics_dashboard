@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AISummary } from "@/components/dashboard/AISummary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
@@ -18,7 +18,6 @@ export default function Performance() {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "main";
   useSocketRefresh(["performance"]);
-  const { token } = useAuthStore();
   const [sheetsData, setSheetsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [tlFilter, setTlFilter] = useState("");
@@ -26,16 +25,14 @@ export default function Performance() {
   const fetchSheets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/ceo-dashboard/sheets-data?tab=all");
       if (res.ok) {
         const d = await res.json();
         if (!d.error) setSheetsData(d);
       }
     } catch {}
     setLoading(false);
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchSheets(); }, [fetchSheets]);
 

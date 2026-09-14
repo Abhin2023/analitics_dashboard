@@ -11,7 +11,7 @@ from app.db.base import Base
 from app.core.security import hash_password
 from app.models.models import (
     Role, Permission, RolePermission, User, UserStoreAccess,
-    Store, Currency, KPIWeight, IncentiveBand, Setting, TeleSheetAssignment,
+    Store, Currency, KPIWeight, IncentiveBand, Setting,
 )
 from app.instagram.models import (
     AIProvider, IGAccount, IGConversation, IGMessage,
@@ -37,6 +37,7 @@ ROLE_PERMISSIONS = {
         "tasks": {"view"}, "performance": {"view", "edit", "export"},
         "reports": {"view", "export"}, "investments": {"view"},
         "instagram": {"view"}, "ai_analytics": {"view", "manage"},
+        "users": {"view", "create"},
     },
     "COO": {
         "dashboard": {"view"}, "team_leaders": {"view", "edit"},
@@ -112,20 +113,6 @@ STORES = [
     ("Mumbai Store", "Mumbai", 20000, 600000, "Maharashtra"),
 ]
 
-TL_EMAILS = {
-    "Harsh": "breakprotectiontele@gmail.com",
-    "Sam": "breakprotectionkodchennai@gmail.com",
-    "Michael": "michael.breakprotection@gmail.com",
-    "Vishnu": "breakprotectionmarathahalli@gmail.com",
-    "Abdullah": "breakprotectionhytech@gmail.com",
-    "Nazil": "breakprotectionindiranagar@gmail.com",
-    "Guwahati": "guwahati@breakprotection.com",
-    "Delhi": "delhi@breakprotection.com",
-    "Kerala": "kerala@breakprotection.com",
-    "Chennai": "chennai@breakprotection.com",
-    "Mumbai": "mumbai@breakprotection.com",
-}
-
 KPI_WEIGHTS = [
     ("Revenue vs Target", "Revenue achievement against monthly target", 0.30),
     ("DSR Submission Rate", "Daily submission completeness", 0.10),
@@ -147,49 +134,9 @@ INCENTIVE_BANDS = [
 ]
 
 
-async def ensure_sheet_assignments():
-    """Create TeleSheetAssignment records if missing. Runs even if already seeded."""
-    SHEET_ASSIGNMENTS = [
-        ("sanjay@breakprotection.com", "Kerala"),
-        ("nazil.tele@breakprotection.com", "Bangalore"),
-        ("nirmala@breakprotection.com", "Delhi"),
-        ("sam.tele@breakprotection.com", "Chennai"),
-        ("ekbal@breakprotection.com", "Guwahati"),
-        ("guwahati@breakprotection.com", "Guwahati"),
-        ("delhi@breakprotection.com", "Delhi"),
-        ("kerala@breakprotection.com", "Kerala"),
-        ("chennai@breakprotection.com", "Chennai"),
-        ("mumbai@breakprotection.com", "Bangalore"),
-    ]
-    async with AsyncSessionLocal() as db:
-        assignment_count = 0
-        for email, sheet_name in SHEET_ASSIGNMENTS:
-            result = await db.execute(select(User).where(User.email == email))
-            target_user = result.scalar_one_or_none()
-            if not target_user:
-                continue
-            result = await db.execute(
-                select(TeleSheetAssignment).where(
-                    TeleSheetAssignment.user_id == target_user.id,
-                    TeleSheetAssignment.sheet_tl_name == sheet_name,
-                )
-            )
-            if result.scalar_one_or_none():
-                continue
-            db.add(TeleSheetAssignment(user_id=target_user.id, sheet_tl_name=sheet_name))
-            assignment_count += 1
-        if assignment_count:
-            await db.commit()
-            print(f"  Created {assignment_count} sheet assignments")
-        else:
-            print("  Sheet assignments already up to date")
-
-
 async def seed():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-    await ensure_sheet_assignments()
 
     async with AsyncSessionLocal() as db:
         # Check if already seeded
@@ -262,28 +209,29 @@ async def seed():
         await db.flush()
         print("  Created COO (coo@breakprotection.com / coo123)")
 
-        # 5. Team Leaders
-        tl_users = {}
-        for tl_name, email in TL_EMAILS.items():
-            if tl_name not in tl_users:
-                user = User(
-                    name=tl_name,
-                    email=email,
-                    password_hash=hash_password(f"{tl_name.lower()}123"),
-                    role_id=role_objs["Team Leader"].id,
-                    is_active=True,
-                )
-                db.add(user)
-                await db.flush()
-                tl_users[tl_name] = user
-        print(f"  Created {len(tl_users)} Team Leaders")
+        # 5. "Unassigned" placeholder team leader — stores need a non-null
+        # team_leader_id at creation time, but real team leaders are meant to
+        # be created by an admin (Settings > Users) and assigned to branches
+        # (Settings > Team Leaders & Branches) after seeding, not seeded as
+        # fake demo people.
+        unassigned_tl = User(
+            name="Unassigned",
+            email="unassigned@system.local",
+            password_hash=hash_password("not-a-real-login"),
+            role_id=role_objs["Team Leader"].id,
+            is_active=False,
+        )
+        db.add(unassigned_tl)
+        await db.flush()
+        print("  Created 'Unassigned' placeholder team leader")
 
-        # 6. Stores
+        # 6. Stores (all start owned by the placeholder TL above until an
+        # admin assigns a real team leader to each one)
         store_objs = {}
-        for store_name, tl_name, daily, monthly, region in STORES:
+        for store_name, _tl_name, daily, monthly, region in STORES:
             store = Store(
                 name=store_name,
-                team_leader_id=tl_users[tl_name].id,
+                team_leader_id=unassigned_tl.id,
                 currency_code="INR",
                 daily_target=daily,
                 monthly_target=monthly,
@@ -292,9 +240,8 @@ async def seed():
             db.add(store)
             await db.flush()
             store_objs[store_name] = store
-            db.add(UserStoreAccess(user_id=tl_users[tl_name].id, store_id=store.id))
         await db.flush()
-        print(f"  Created {len(store_objs)} stores + TL access links")
+        print(f"  Created {len(store_objs)} stores (owned by 'Unassigned' until assigned)")
 
         # 6b. Salespersons (1 per city-based TL)
         salesperson_data = [
@@ -324,28 +271,10 @@ async def seed():
         await db.flush()
         print(f"  Created {len(sp_users)} Salespersons")
 
-        # 6c. Telecallers
-        telecaller_data = [
-            ("SANJAY", "sanjay@breakprotection.com"),
-            ("Nazil Tele", "nazil.tele@breakprotection.com"),
-            ("Nirmala", "nirmala@breakprotection.com"),
-            ("SAM Tele", "sam.tele@breakprotection.com"),
-            ("Ekbal", "ekbal@breakprotection.com"),
-        ]
-        tc_role = role_objs["Telecaller"]
-        tc_users = {}
-        for tc_name, tc_email in telecaller_data:
-            user = User(
-                name=tc_name,
-                email=tc_email,
-                password_hash=hash_password(f"{tc_name.split()[0].lower()}123"),
-                role_id=tc_role.id,
-                is_active=True,
-            )
-            db.add(user)
-            await db.flush()
-            tc_users[tc_name] = user
-        print(f"  Created {len(tc_users)} Telecallers")
+        # Telecallers are no longer seeded as fake demo people — create real
+        # ones via Settings > Users (or have a Team Leader create one from
+        # the Leads Update page), then assign them to a city sheet via
+        # Settings > Sheet Assignments.
 
         # 7. KPI Weights
         for name, desc, weight in KPI_WEIGHTS:

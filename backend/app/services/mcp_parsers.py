@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from typing import Any
 
 
@@ -11,6 +12,14 @@ def _parse_amount(text: str) -> float:
 def _parse_int(text: str) -> int:
     match = re.search(r"\d+", text)
     return int(match.group()) if match else 0
+
+
+def _parse_mcp_date(text: str) -> str:
+    """Parse MCP's 'dd-Mon-yyyy' date (e.g. '14-Sep-2026') to ISO 'YYYY-MM-DD'."""
+    try:
+        return datetime.strptime(text.strip(), "%d-%b-%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return text.strip()
 
 
 def parse_sales_summary(text: str) -> dict[str, Any]:
@@ -103,27 +112,19 @@ def parse_transaction_detail(text: str) -> list[dict[str, Any]]:
         if line.startswith("#"):
             if current:
                 transactions.append(current)
+            # Format: "#110843 | 14-Sep-2026 | Heavenly Treasure - Velachery | New Sale"
             parts = line.split("|")
-            shop_date = parts[1].strip() if len(parts) > 1 else ""
-            category = parts[2].strip() if len(parts) > 2 else ""
             current = {
-                "id": _parse_int(parts[0]),
-                "date": shop_date,
-                "shop": "",
-                "category": category,
+                "id": _parse_int(parts[0]) if len(parts) > 0 else 0,
+                "date": _parse_mcp_date(parts[1]) if len(parts) > 1 else "",
+                "shop": parts[2].strip() if len(parts) > 2 else "",
+                "category": parts[3].strip() if len(parts) > 3 else "",
                 "model": "",
                 "imei": "",
                 "amount": 0.0,
                 "discount": 0.0,
                 "paid": False,
             }
-            # Extract shop name (between date and category)
-            if len(parts) > 1:
-                date_shop = parts[1].strip()
-                date_match = re.match(r"(\d{2}-\w+-\d{4})\s*\|\s*(.*?)$", date_shop)
-                if date_match:
-                    current["date"] = date_match.group(1)
-                    current["shop"] = date_match.group(2).strip()
 
         elif current and not line.startswith("#"):
             if "IMEI" in line:
@@ -150,35 +151,37 @@ def parse_transaction_detail(text: str) -> list[dict[str, Any]]:
     return transactions
 
 
+_TARGET_ROW_RE = re.compile(
+    r"^(.+?)\s+[A-Z]{3}\s*([\d,]+\.\d{2})\s+[A-Z]{3}\s*([\d,]+\.\d{2})\s+([\d.]+)%\s*(.*)$"
+)
+_NOTE_ROW_RE = re.compile(r"^(.*?)\s+[A-Z]{3}\s*([\d,]+\.?\d*)\s*\(no target\)")
+
+
 def parse_shop_target_achievement(text: str) -> list[dict[str, Any]]:
-    """Parse shop_target_achievement MCP response."""
+    """Parse shop_target_achievement MCP response.
+
+    Main table is one line per shop:
+      "<shop name>  <CUR> <target>  <CUR> <actual>   <pct>%  <arrow> <status>"
+    Shops with sales but no target configured land in a separate NOTE section:
+      "<shop name>  <CUR> <amount>  (no target)"
+    """
     shops = []
-    current = None
     in_note_section = False
 
     lines = text.split("\r\n")
     for line in lines:
         line = line.strip()
-        if not line:
+        if not line or line.startswith("─") or line.startswith("Period") or line.startswith("SHOP TARGET"):
+            continue
+        if line.lower().startswith("shop ") or line.upper().startswith("TOTAL"):
             continue
 
         if line.startswith("NOTE"):
             in_note_section = True
             continue
 
-        if line.startswith("■ "):
-            in_note_section = False
-            if current:
-                shops.append(current)
-            current = {
-                "shop": line[2:].strip(),
-                "target": 0.0,
-                "actual": 0.0,
-                "achievement_pct": 0.0,
-                "status": "",
-            }
-        elif in_note_section and not line.startswith("─") and not line.startswith("Period"):
-            match = re.match(r"^(.*?)\s+[A-Z]{3}\s+([\d,]+\.?\d*)\s*\(no target\)", line)
+        if in_note_section:
+            match = _NOTE_ROW_RE.match(line)
             if match:
                 shops.append({
                     "shop": match.group(1).strip(),
@@ -187,21 +190,17 @@ def parse_shop_target_achievement(text: str) -> list[dict[str, Any]]:
                     "achievement_pct": 0.0,
                     "status": "no target",
                 })
-        elif current:
-            lower = line.lower()
-            if "target" in lower and ":" in line and "no target" not in lower:
-                current["target"] = _parse_amount(line.split(":")[1])
-            elif "actual" in lower and ":" in line:
-                current["actual"] = _parse_amount(line.split(":")[1])
-            elif "achievement" in lower and ":" in line:
-                pct_match = re.search(r"([\d.]+)%", line)
-                if pct_match:
-                    current["achievement_pct"] = float(pct_match.group(1))
-            elif line.lower().startswith("over") or line.lower().startswith("under"):
-                current["status"] = line.strip()
+            continue
 
-    if current:
-        shops.append(current)
+        match = _TARGET_ROW_RE.match(line)
+        if match:
+            shops.append({
+                "shop": match.group(1).strip(),
+                "target": _parse_amount(match.group(2)),
+                "actual": _parse_amount(match.group(3)),
+                "achievement_pct": float(match.group(4)),
+                "status": match.group(5).strip(),
+            })
 
     return shops
 

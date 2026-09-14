@@ -111,6 +111,10 @@ class Store(Base):
     variable_cost_pct = Column(Numeric(5, 2), default=0)
     is_active = Column(Boolean, default=True)
     region = Column(String(50), default="")
+    country = Column(String(50), default="India")
+    mcp_country_id = Column(Integer, nullable=True)
+    mcp_shop_name = Column(String(150), nullable=True)
+    needs_review = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -486,6 +490,29 @@ class DailyStoreTracker(Base):
     __table_args__ = (
         UniqueConstraint("store_id", "date"),
         Index("ix_tracker_store_date", "store_id", "date"),
+    )
+
+
+# ── MCP Daily Sales (synced from SmartService, all countries incl. India) ──
+class McpDailySale(Base):
+    __tablename__ = "mcp_daily_sales"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    revenue = Column(Numeric(14, 2), default=0)
+    units_sold = Column(Integer, default=0)
+    new_sale_count = Column(Integer, default=0)
+    replacement_count = Column(Integer, default=0)
+    return_count = Column(Integer, default=0)
+    target = Column(Numeric(14, 2), default=0)
+    currency = Column(String(10), default="")
+    synced_at = Column(DateTime, default=datetime.utcnow)
+
+    store = relationship("Store")
+
+    __table_args__ = (
+        UniqueConstraint("store_id", "date"),
+        Index("ix_mcp_daily_sales_store_date", "store_id", "date"),
     )
 
 

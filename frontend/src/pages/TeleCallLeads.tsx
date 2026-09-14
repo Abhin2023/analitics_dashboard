@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 import { useSocketRefresh } from "../hooks/useSocketRefresh";
@@ -83,7 +84,7 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 
 export default function TeleCallLeads() {
   useSocketRefresh(["tele_call_leads"]);
-  const { token, user } = useAuthStore();
+  const { user } = useAuthStore();
 
   const [tlGroups, setTlGroups] = useState<Record<string, TlGroup>>({});
   const [total, setTotal] = useState(0);
@@ -98,6 +99,11 @@ export default function TeleCallLeads() {
   const [saving, setSaving] = useState(false);
   const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
   const [telecallers, setTelecallers] = useState<Telecaller[]>([]);
+  const [quickUpdating, setQuickUpdating] = useState<number | null>(null);
+  const [showAddTelecaller, setShowAddTelecaller] = useState(false);
+  const [newTelecaller, setNewTelecaller] = useState({ name: "", email: "", password: "", sheet_tl_name: "" });
+  const [addTelecallerError, setAddTelecallerError] = useState("");
+  const [addingTelecaller, setAddingTelecaller] = useState(false);
 
   const isTL = role === "Team Leader";
   const isTelecaller = role === "Telecaller";
@@ -109,9 +115,7 @@ export default function TeleCallLeads() {
   const fetchLeads = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/tele-call-leads", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/tele-call-leads");
       if (res.ok) {
         const d = await res.json();
         setTlGroups(d.tl_groups || {});
@@ -120,32 +124,28 @@ export default function TeleCallLeads() {
       }
     } catch {}
     setLoading(false);
-  }, [token]);
+  }, []);
 
   const fetchSalespersons = useCallback(async () => {
     if (!canAssign) return;
     try {
-      const res = await fetch("/api/v1/tele-call-leads/salespersons", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/tele-call-leads/salespersons");
       if (res.ok) {
         const d = await res.json();
         setSalespersons(d.salespersons || []);
       }
     } catch {}
-  }, [token, canAssign]);
+  }, [canAssign]);
 
   const fetchTelecallers = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/tele-call-leads/telecallers", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await api.fetchRaw("/tele-call-leads/telecallers");
       if (res.ok) {
         const d = await res.json();
         setTelecallers(d.telecallers || []);
       }
     } catch {}
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchLeads();
@@ -156,14 +156,11 @@ export default function TeleCallLeads() {
   const handleSync = useCallback(async () => {
     setSyncing(true);
     try {
-      await fetch("/api/v1/tele-call-leads/sync", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.fetchRaw("/tele-call-leads/sync", { method: "POST" });
       await fetchLeads();
     } catch {}
     setSyncing(false);
-  }, [token, fetchLeads]);
+  }, [fetchLeads]);
 
   const handleEditStart = useCallback((lead: Lead) => {
     setEditingLead(lead.id);
@@ -187,12 +184,9 @@ export default function TeleCallLeads() {
   const handleSave = useCallback(async (leadId: number) => {
     setSaving(true);
     try {
-      const res = await fetch(`/api/v1/tele-call-leads/${leadId}`, {
+      const res = await api.fetchRaw(`/tele-call-leads/${leadId}`, {
         method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editForm),
       });
       if (res.ok) {
@@ -202,23 +196,64 @@ export default function TeleCallLeads() {
       }
     } catch {}
     setSaving(false);
-  }, [token, editForm, fetchLeads]);
+  }, [editForm, fetchLeads]);
+
+  // One-tap status update for the mobile card view — the backend only
+  // touches the status field on a partial PUT, so this can't clobber a
+  // lead's other fields the way sending a full form snapshot would.
+  const handleQuickStatusUpdate = useCallback(async (lead: Lead, status: string) => {
+    if (lead.status === status || quickUpdating !== null) return;
+    setQuickUpdating(lead.id);
+    try {
+      const res = await api.fetchRaw(`/tele-call-leads/${lead.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) await fetchLeads();
+    } catch {}
+    setQuickUpdating(null);
+  }, [fetchLeads, quickUpdating]);
 
   const handleAssign = useCallback(async (leadId: number, salespersonName: string) => {
     try {
-      const res = await fetch(`/api/v1/tele-call-leads/${leadId}/assign`, {
+      const res = await api.fetchRaw(`/tele-call-leads/${leadId}/assign`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ salesperson: salespersonName }),
       });
       if (res.ok) {
         await fetchLeads();
       }
     } catch {}
-  }, [token, fetchLeads]);
+  }, [fetchLeads]);
+
+  const handleCreateTelecaller = useCallback(async () => {
+    setAddTelecallerError("");
+    if (!newTelecaller.name || !newTelecaller.email || !newTelecaller.password || !newTelecaller.sheet_tl_name) {
+      setAddTelecallerError("All fields are required");
+      return;
+    }
+    setAddingTelecaller(true);
+    try {
+      const res = await api.fetchRaw("/tele-call-leads/create-telecaller", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTelecaller),
+      });
+      if (res.ok) {
+        setShowAddTelecaller(false);
+        setNewTelecaller({ name: "", email: "", password: "", sheet_tl_name: "" });
+        await fetchTelecallers();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setAddTelecallerError(err.detail || "Failed to create telecaller");
+      }
+    } catch {
+      setAddTelecallerError("Failed to create telecaller");
+    }
+    setAddingTelecaller(false);
+  }, [newTelecaller, fetchTelecallers]);
 
   const tlNames = useMemo(() => Object.keys(tlGroups).sort(), [tlGroups]);
 
@@ -251,6 +286,12 @@ export default function TeleCallLeads() {
     return Array.from(s).sort();
   }, [tlGroups]);
 
+  // The lead currently open in the mobile edit sheet.
+  const editingLeadObj = useMemo(
+    () => filteredLeads.find((l) => l.id === editingLead) || null,
+    [filteredLeads, editingLead]
+  );
+
   // For telecallers and salespersons, auto-expand their single sheet
   useEffect(() => {
     if ((isTelecaller || isSalesperson) && tlNames.length === 1 && !expandedTl) {
@@ -280,6 +321,15 @@ export default function TeleCallLeads() {
                 <Edit3 size={12} className="inline mr-1" />
                 Edit Mode
               </span>
+            )}
+            {canAssign && (
+              <button
+                onClick={() => setShowAddTelecaller(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-white/5 border border-[var(--border-subtle)] text-white hover:bg-white/10 transition"
+              >
+                <UserPlus size={16} />
+                Add Telecaller
+              </button>
             )}
             {!isSalesperson && (
               <button
@@ -433,7 +483,83 @@ export default function TeleCallLeads() {
                           No leads found{statusFilter ? ` with status "${statusFilter}"` : ""}{searchQuery ? ` matching "${searchQuery}"` : ""}
                         </div>
                       ) : (
-                        <div className="overflow-x-auto">
+                        <>
+                        {/* Mobile card list — the desktop table below is unusable on a
+                            phone (13 columns, tiny inline dropdowns, needs horizontal
+                            scroll while editing), so phones get one-tap status chips
+                            and a full-screen edit sheet instead. */}
+                        <div className="md:hidden divide-y divide-[var(--border-subtle)]">
+                          {filteredLeads.map((lead) => (
+                            <div key={lead.id} className="p-4 space-y-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-white truncate">{lead.full_name}</p>
+                                  {lead.phone && (
+                                    <a
+                                      href={`tel:${lead.phone}`}
+                                      className="inline-flex items-center gap-1.5 text-sm text-[var(--accent-blue)] mt-0.5"
+                                    >
+                                      <Phone size={13} /> {lead.phone}
+                                    </a>
+                                  )}
+                                </div>
+                                <span
+                                  className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full"
+                                  style={{
+                                    backgroundColor: `${STATUS_COLORS[lead.status] || "#64748b"}18`,
+                                    color: STATUS_COLORS[lead.status] || "#64748b",
+                                  }}
+                                >
+                                  {STATUS_ICONS[lead.status]}
+                                  {lead.status || "No Status"}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-muted)]">
+                                <span>Source: {lead.lead_source || "—"}</span>
+                                {lead.call_date && <span>Called: {lead.call_date}</span>}
+                                {lead.appointment_date && <span>Appt: {lead.appointment_date}</span>}
+                                {canAssign && <span>Salesperson: {lead.salesperson || "—"}</span>}
+                              </div>
+                              {lead.remarks && (
+                                <p className="text-xs text-[var(--text-secondary)] line-clamp-2">{lead.remarks}</p>
+                              )}
+
+                              {canEdit && (
+                                <>
+                                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
+                                    {STATUS_OPTIONS.map((s) => {
+                                      const active = lead.status === s;
+                                      return (
+                                        <button
+                                          key={s}
+                                          onClick={() => handleQuickStatusUpdate(lead, s)}
+                                          disabled={quickUpdating === lead.id}
+                                          className="shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-2.5 rounded-xl border transition disabled:opacity-50"
+                                          style={
+                                            active
+                                              ? { backgroundColor: STATUS_COLORS[s], borderColor: STATUS_COLORS[s], color: "#fff" }
+                                              : { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }
+                                          }
+                                        >
+                                          {STATUS_ICONS[s]} {s}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <button
+                                    onClick={() => handleEditStart(lead)}
+                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] text-sm font-semibold"
+                                  >
+                                    <Edit3 size={15} /> Edit Details
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="hidden md:block overflow-x-auto">
                           <table className="w-full text-sm text-left border-collapse">
                             <thead>
                               <tr className="text-[var(--text-muted)] text-xs uppercase tracking-wider border-b border-[var(--border-subtle)]">
@@ -620,12 +746,245 @@ export default function TeleCallLeads() {
                             </tbody>
                           </table>
                         </div>
+                        </>
                       )}
                     </div>
                   )}
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Mobile edit sheet — shares editingLead/editForm state with the
+            desktop table's inline row editor above; hidden on desktop since
+            that already edits inline. */}
+        {editingLead !== null && editingLeadObj && (
+          <div
+            className="md:hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end justify-center"
+            onClick={(e) => { if (e.target === e.currentTarget) handleEditCancel(); }}
+          >
+            <div className="w-full max-h-[92vh] overflow-y-auto bg-[#11131e] border-t border-[var(--border-subtle)] rounded-t-2xl">
+              <div className="sticky top-0 bg-[#11131e] flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">{editingLeadObj.full_name}</h3>
+                  {editingLeadObj.phone && <p className="text-xs text-[var(--text-muted)]">{editingLeadObj.phone}</p>}
+                </div>
+                <button onClick={handleEditCancel} className="p-2 rounded-lg hover:bg-white/5 text-[var(--text-muted)] shrink-0">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Status</label>
+                  <div className="flex flex-wrap gap-2">
+                    {STATUS_OPTIONS.map((s) => {
+                      const active = editForm.status === s;
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, status: s })}
+                          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2.5 rounded-xl border transition"
+                          style={
+                            active
+                              ? { backgroundColor: STATUS_COLORS[s], borderColor: STATUS_COLORS[s], color: "#fff" }
+                              : { backgroundColor: "rgba(255,255,255,0.05)", borderColor: "var(--border-subtle)", color: "var(--text-secondary)" }
+                          }
+                        >
+                          {STATUS_ICONS[s]} {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Person Calling</label>
+                  <select
+                    value={editForm.person_calling || ""}
+                    onChange={(e) => setEditForm({ ...editForm, person_calling: e.target.value })}
+                    className="w-full px-3 py-3 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-base text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                  >
+                    <option value="">Select caller</option>
+                    {telecallers
+                      .filter((tc) => tc.sheet === editingLeadObj.sheet_tl_name)
+                      .map((tc) => (
+                        <option key={tc.id} value={tc.name}>{tc.name}</option>
+                      ))}
+                    {telecallers.filter((tc) => tc.sheet === editingLeadObj.sheet_tl_name).length === 0 && (
+                      <option value={editForm.person_calling || ""}>
+                        {editForm.person_calling || "No telecallers assigned"}
+                      </option>
+                    )}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Call Date</label>
+                    <DatePicker
+                      value={editForm.call_date || ""}
+                      onChange={(d) => setEditForm({ ...editForm, call_date: d })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Appointment</label>
+                    <DatePicker
+                      value={editForm.appointment_date || ""}
+                      onChange={(d) => setEditForm({ ...editForm, appointment_date: d })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Product</label>
+                  <input
+                    type="text"
+                    value={editForm.product || ""}
+                    onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}
+                    placeholder="Optional"
+                    className="w-full px-3 py-3 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-base text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Sale Amount</label>
+                  <input
+                    type="text"
+                    value={editForm.sale_amount || ""}
+                    onChange={(e) => setEditForm({ ...editForm, sale_amount: e.target.value })}
+                    placeholder="Optional"
+                    className="w-full px-3 py-3 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-base text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                  />
+                </div>
+
+                {canAssign && (
+                  <div>
+                    <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Salesperson</label>
+                    <select
+                      value={editForm.salesperson || ""}
+                      onChange={(e) => setEditForm({ ...editForm, salesperson: e.target.value })}
+                      className="w-full px-3 py-3 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-base text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                    >
+                      <option value="">Unassigned</option>
+                      {salespersons.map((sp) => (
+                        <option key={sp.id} value={sp.name}>{sp.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5 block">Remarks</label>
+                  <textarea
+                    value={editForm.remarks || ""}
+                    onChange={(e) => setEditForm({ ...editForm, remarks: e.target.value })}
+                    rows={3}
+                    className="w-full px-3 py-3 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-base text-white focus:outline-none focus:border-[var(--accent-blue)] resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-[#11131e] border-t border-[var(--border-subtle)] p-4 flex gap-2">
+                <button
+                  onClick={handleEditCancel}
+                  className="flex-1 py-3 rounded-xl border border-[var(--border-subtle)] text-[var(--text-secondary)] font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSave(editingLead)}
+                  disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-[var(--accent-blue)] text-white font-semibold disabled:opacity-50"
+                >
+                  <Save size={16} /> {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Telecaller modal */}
+        {showAddTelecaller && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowAddTelecaller(false); }}
+          >
+            <div className="w-full max-w-md rounded-2xl border border-[var(--border-subtle)] bg-[#11131e] p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <UserPlus size={18} className="text-[var(--accent-blue)]" />
+                  Add Telecaller
+                </h3>
+                <button onClick={() => setShowAddTelecaller(false)} className="p-1.5 rounded-lg hover:bg-white/5 text-[var(--text-muted)]">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <p className="text-xs text-[var(--text-muted)] mb-4">
+                {isTL
+                  ? "Creates a Telecaller account and assigns it to one of your own sheets."
+                  : "Creates a Telecaller account and assigns it to a city sheet."}
+              </p>
+
+              {addTelecallerError && (
+                <div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                  {addTelecallerError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  placeholder="Full name"
+                  value={newTelecaller.name}
+                  onChange={(e) => setNewTelecaller((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-sm text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={newTelecaller.email}
+                  onChange={(e) => setNewTelecaller((p) => ({ ...p, email: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-sm text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={newTelecaller.password}
+                  onChange={(e) => setNewTelecaller((p) => ({ ...p, password: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-sm text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                />
+                <select
+                  value={newTelecaller.sheet_tl_name}
+                  onChange={(e) => setNewTelecaller((p) => ({ ...p, sheet_tl_name: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] text-sm text-white focus:outline-none focus:border-[var(--accent-blue)]"
+                >
+                  <option value="">Select sheet</option>
+                  {tlNames.map((tl) => (
+                    <option key={tl} value={tl}>{tl}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-2 mt-5">
+                <button
+                  onClick={() => setShowAddTelecaller(false)}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-[var(--border-subtle)] text-xs font-semibold text-[var(--text-secondary)] hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateTelecaller}
+                  disabled={addingTelecaller}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--accent-blue)] text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-50"
+                >
+                  {addingTelecaller ? "Creating..." : "Create Telecaller"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -61,3 +61,30 @@ def require_permission(resource: str, action: str):
             )
         return user
     return Depends(dependency)
+
+
+ADMIN_TIER_ROLES = {"SuperAdmin", "Admin", "CEO", "COO", "Regional Manager"}
+
+
+def require_admin_tier():
+    """Restricts to company-wide/admin-tier roles. Team Leader, Telecaller,
+    Salesperson, Store Staff, and Viewer all have their own scoped
+    dashboards and must never reach a company-wide report endpoint just
+    because they hold the generic "dashboard:view" permission — that
+    permission only gates whether a role has a dashboard at all, not
+    whether it should see every branch/country in the company.
+    """
+    async def dependency(
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        role_name = (
+            await db.execute(select(Role.name).where(Role.id == user.role_id))
+        ).scalar_one_or_none()
+        if role_name not in ADMIN_TIER_ROLES:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This report is only available to admin-tier roles",
+            )
+        return user
+    return Depends(dependency)

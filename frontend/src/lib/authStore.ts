@@ -83,3 +83,7 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+api.setOnTokenRefreshed((token) => {
+  useAuthStore.setState({ token });
+});

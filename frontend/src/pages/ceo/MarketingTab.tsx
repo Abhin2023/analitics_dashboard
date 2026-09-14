@@ -15,6 +15,9 @@ export function MarketingTab({ data }: { data: any }) {
   const storeDashboard = data?.store_dashboard || [];
 
   const storeAgg = useMemo(() => {
+    // dailyTracker rows are ordered by date desc, so the first row seen per
+    // store is its latest snapshot — mtd_revenue is already a cumulative
+    // running total as of that date, so it must be read once, never summed.
     const map: Record<string, any> = {};
     for (const r of dailyTracker) {
       const s = r.store;
@@ -22,7 +25,7 @@ export function MarketingTab({ data }: { data: any }) {
       if (!map[s]) {
         map[s] = {
           store: s, country: r.country, storeType: r.store_type,
-          dailyRevenue: 0, mtdRevenue: 0, monthlyTarget: 0, unitsSold: 0, carePlus: 0, prebookings: 0,
+          dailyRevenue: 0, mtdRevenue: r.mtd_revenue || 0, monthlyTarget: r.monthly_target || 0, unitsSold: 0, carePlus: 0, prebookings: 0,
           igVideos: 0, igViewsTarget: 0, igViewsAchieved: 0, igFollowers: 0, igNewFollowers: 0,
           igLikes: 0, igComments: 0, igSaves: 0, igShares: 0, igDms: 0, igManychat: 0, igPosts: 0,
           ytViews: 0, ytLikes: 0, ytComments: 0,
@@ -34,8 +37,6 @@ export function MarketingTab({ data }: { data: any }) {
       }
       const m = map[s];
       m.dailyRevenue += r.daily_revenue || 0;
-      m.mtdRevenue += r.mtd_revenue || 0;
-      m.monthlyTarget = r.monthly_target || m.monthlyTarget;
       m.unitsSold += r.units_sold || 0;
       m.carePlus += r.care_plus_attached || 0;
       m.prebookings += r.prebookings || 0;

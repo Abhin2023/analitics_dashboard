@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { Package, Search, Filter, RefreshCw } from "lucide-react";
 
 interface StockItem {
@@ -27,7 +27,6 @@ const COUNTRIES = [
 ];
 
 export default function StockPosition() {
-  const { token } = useAuthStore();
   const [data, setData] = useState<StockShop[]>([]);
   const [loading, setLoading] = useState(true);
   const [countryId, setCountryId] = useState<number>(4);
@@ -37,10 +36,7 @@ export default function StockPosition() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/mcp/stock/position?country_id=${countryId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await api.fetchRaw(`/mcp/stock/position?country_id=${countryId}`);
       if (res.ok) {
         const d = await res.json();
         setData(d);
@@ -49,7 +45,7 @@ export default function StockPosition() {
       }
     } catch {}
     setLoading(false);
-  }, [token, countryId]);
+  }, [countryId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

@@ -22,8 +22,11 @@ import Reports from "./pages/Reports";
 import Investments from "./pages/Investments";
 import StockPosition from "./pages/StockPosition";
 import CountryComparison from "./pages/CountryComparison";
+import SalesReports from "./pages/SalesReports";
 import RolesPermissions from "./pages/settings/RolesPermissions";
 import UserManagement from "./pages/settings/Users";
+import BranchAssignment from "./pages/settings/BranchAssignment";
+import SheetAssignments from "./pages/settings/SheetAssignments";
 import KPIWeights from "./pages/settings/KPIWeights";
 import DataSync from "./pages/settings/DataSync";
 import CurrencySettings from "./pages/settings/Currency";
@@ -38,11 +41,15 @@ import HostedForm from "./pages/instagram/HostedForm";
 import TeleCallLeads from "./pages/TeleCallLeads";
 
 function SocketProvider({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.token);
+  // Keyed on presence, not the token's value — a silent token refresh
+  // changes the token string without logging the user out, and shouldn't
+  // tear down and reconnect the socket (getSocket() always sends the
+  // current token on each connection attempt anyway).
+  const isAuthenticated = useAuthStore((s) => !!s.token);
   useEffect(() => {
-    if (token) getSocket();
+    if (isAuthenticated) getSocket();
     return () => disconnectSocket();
-  }, [token]);
+  }, [isAuthenticated]);
   return <>{children}</>;
 }
 
@@ -70,6 +77,7 @@ export default function App() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/stock-position" element={<StockPosition />} />
           <Route path="/country-comparison" element={<CountryComparison />} />
+          <Route path="/sales-reports" element={<SalesReports />} />
           <Route path="/investments" element={<Investments />} />
           <Route path="/instagram" element={<InstagramDashboard />} />
           <Route path="/instagram/setup" element={<InstagramSetup />} />
@@ -78,6 +86,8 @@ export default function App() {
           <Route path="/instagram/submissions" element={<FormSubmissions />} />
           <Route path="/settings/roles" element={<RolesPermissions />} />
           <Route path="/settings/users" element={<UserManagement />} />
+          <Route path="/settings/branch-assignment" element={<BranchAssignment />} />
+          <Route path="/settings/sheet-assignments" element={<SheetAssignments />} />
           <Route path="/settings/kpi-weights" element={<KPIWeights />} />
           <Route path="/settings/data-sync" element={<DataSync />} />
           <Route path="/settings/currency" element={<CurrencySettings />} />

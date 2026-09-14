@@ -292,6 +292,117 @@ async def create_sheet_assignment(
     return {"ok": True, "message": f"Assigned {target_user.name} to {body.sheet_tl_name}"}
 
 
+@router.get("/sheet-assignments")
+async def list_sheet_assignments(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """List every user→sheet assignment. Admin only."""
+    role_name = await _get_user_role_name(db, user)
+    if role_name not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    result = await db.execute(
+        select(TeleSheetAssignment, User.name, User.email, Role.name)
+        .join(User, TeleSheetAssignment.user_id == User.id)
+        .join(Role, Role.id == User.role_id)
+        .order_by(TeleSheetAssignment.sheet_tl_name, User.name)
+    )
+    rows = result.all()
+    return {
+        "assignments": [
+            {
+                "id": assignment.id,
+                "user_id": assignment.user_id,
+                "user_name": user_name,
+                "user_email": user_email,
+                "role_name": role_name_,
+                "sheet_tl_name": assignment.sheet_tl_name,
+            }
+            for assignment, user_name, user_email, role_name_ in rows
+        ],
+        "sheets": TELE_CALL_SHEETS,
+    }
+
+
+@router.delete("/sheet-assignments/{assignment_id}")
+async def delete_sheet_assignment(
+    assignment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Remove a user→sheet assignment. Admin only."""
+    role_name = await _get_user_role_name(db, user)
+    if role_name not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    result = await db.execute(
+        select(TeleSheetAssignment).where(TeleSheetAssignment.id == assignment_id)
+    )
+    assignment = result.scalar_one_or_none()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+
+    await db.delete(assignment)
+    await db.commit()
+    return {"ok": True, "message": "Assignment removed"}
+
+
+class CreateTelecallerRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    sheet_tl_name: str
+
+
+@router.post("/create-telecaller")
+async def create_telecaller(
+    body: CreateTelecallerRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Create a Telecaller account and assign it to a city sheet in one step.
+    Team Leaders can only assign to a sheet they themselves are assigned to;
+    Admin-tier roles can assign to any sheet.
+    """
+    from ...core.security import hash_password
+
+    role_name = await _get_user_role_name(db, user)
+    if role_name != "Team Leader" and role_name not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Only team leaders or admins can create telecaller accounts")
+
+    valid_sheets = {s["tl_name"] for s in TELE_CALL_SHEETS}
+    if body.sheet_tl_name not in valid_sheets:
+        raise HTTPException(status_code=400, detail=f"Invalid sheet name. Valid: {valid_sheets}")
+
+    if role_name == "Team Leader":
+        my_sheets = await _get_user_sheet_names(db, user)
+        if body.sheet_tl_name not in my_sheets:
+            raise HTTPException(status_code=403, detail="You can only assign telecallers to your own sheet")
+
+    existing = await db.execute(select(User).where(User.email == body.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="A user with this email already exists")
+
+    tc_role = (await db.execute(select(Role).where(Role.name == "Telecaller"))).scalar_one_or_none()
+    if not tc_role:
+        raise HTTPException(status_code=500, detail="Telecaller role not found")
+
+    new_user = User(
+        name=body.name,
+        email=body.email,
+        password_hash=hash_password(body.password),
+        role_id=tc_role.id,
+        is_active=True,
+    )
+    db.add(new_user)
+    await db.flush()
+    db.add(TeleSheetAssignment(user_id=new_user.id, sheet_tl_name=body.sheet_tl_name))
+    await db.commit()
+
+    return {"ok": True, "user_id": new_user.id, "message": f"Created {body.name} and assigned to {body.sheet_tl_name}"}
+
+
 # ── Dynamic routes LAST (after all static paths) ───────────────────
 
 @router.put("/{lead_id}")

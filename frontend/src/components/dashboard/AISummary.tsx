@@ -260,7 +260,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
   const canManage = useAuthStore((s) =>
     s.hasPermission("ai_analytics", "manage") || ["SuperAdmin", "Admin", "CEO"].includes(s.user?.role_name || "")
   );
-  const token = useAuthStore((s) => s.token);
+  const isAuthenticated = useAuthStore((s) => !!s.token);
 
   const [data, setData] = useState<SummaryData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -279,9 +279,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/ai-analytics/summary?section=${section}`, {
-        headers: { Authorization: `Bearer ${token || ""}` },
-      });
+      const res = await api.fetchRaw(`/ai-analytics/summary?section=${section}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
@@ -293,15 +291,16 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
     } finally {
       setLoading(false);
     }
-  }, [token, section]);
+  }, [section]);
 
   useEffect(() => {
     fetchSummary();
   }, [fetchSummary]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     const socket = getSocket();
+    if (!socket) return;
     const handleRefresh = () => {
       fetchSummary();
     };
@@ -309,7 +308,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
     return () => {
       socket.off("data:refresh", handleRefresh);
     };
-  }, [token, fetchSummary]);
+  }, [isAuthenticated, fetchSummary]);
 
   const openSettings = useCallback(async () => {
     setConfigError(null);

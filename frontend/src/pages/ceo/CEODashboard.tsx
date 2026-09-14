@@ -8,6 +8,7 @@ import { ReviewsTab } from "./ReviewsTab";
 import { PeopleTab } from "./PeopleTab";
 import { ActionCenterTab } from "./ActionCenterTab";
 import { useAuthStore } from "@/lib/authStore";
+import { api } from "@/lib/apiClient";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 
 const TABS = [
@@ -28,17 +29,12 @@ export default function CEODashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const token = useAuthStore((s) => s.token);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/ceo-dashboard/sheets-data?tab=all", {
-        headers: {
-          Authorization: `Bearer ${token || ""}`,
-        },
-      });
+      const res = await api.fetchRaw("/ceo-dashboard/sheets-data?tab=all");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -48,7 +44,7 @@ export default function CEODashboard() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchData();

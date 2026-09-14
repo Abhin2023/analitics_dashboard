@@ -7,7 +7,7 @@ import {
   Megaphone, CheckSquare, BarChart3, FileText, Settings,
   DollarSign, TrendingUp, X, ChevronLeft, ChevronRight, ShieldCheck,
   Camera, MessageCircle, Shield, Table, Settings2, ChevronDown,
-  RefreshCw, Brain, Package, Globe, PhoneCall,
+  RefreshCw, Brain, Package, Globe, PhoneCall, MapPin,
 } from "lucide-react";
 
 interface NavItem {
@@ -31,6 +31,7 @@ const MAIN_NAV_ITEMS: NavItem[] = [
   { to: "/reports", label: "Reports", icon: FileText, resource: "reports" },
   { to: "/stock-position", label: "Stock Position", icon: Package, resource: "dashboard" },
   { to: "/country-comparison", label: "Country Comparison", icon: Globe, resource: "dashboard" },
+  { to: "/sales-reports", label: "Sales Reports", icon: BarChart3, resource: "dashboard" },
 ];
 
 const INSTAGRAM_NAV_ITEMS: NavItem[] = [
@@ -43,7 +44,12 @@ const INSTAGRAM_NAV_ITEMS: NavItem[] = [
 
 const SETTINGS_NAV_ITEMS: NavItem[] = [
   { to: "/settings/roles", label: "Roles & Permissions", icon: Shield, resource: "settings" },
-  { to: "/settings/users", label: "Users", icon: Users, resource: "settings" },
+  // Gated on "users" rather than the blanket "settings" permission so a CEO
+  // (who can create accounts but shouldn't see Roles/KPI-Weights/Currency)
+  // gets just this one item instead of the whole Settings area.
+  { to: "/settings/users", label: "Users", icon: Users, resource: "users" },
+  { to: "/settings/branch-assignment", label: "Team Leaders & Branches", icon: MapPin, resource: "settings" },
+  { to: "/settings/sheet-assignments", label: "Sheet Assignments", icon: PhoneCall, resource: "leads" },
   { to: "/settings/kpi-weights", label: "KPI Weights", icon: BarChart3, resource: "settings" },
   { to: "/settings/data-sync", label: "Data Sync", icon: RefreshCw, resource: "settings" },
   { to: "/settings/currency", label: "Currency", icon: DollarSign, resource: "settings" },
@@ -235,8 +241,11 @@ export function Sidebar() {
   const [igOpen, setIgOpen] = useState(() => location.pathname.startsWith("/instagram"));
   const [settingsOpen, setSettingsOpen] = useState(() => location.pathname.startsWith("/settings"));
 
-  const HIDDEN_FOR_TL = ["/operations", "/stock-position", "/country-comparison", "/investments", "/instagram", "/sales-overview"];
-  const HIDDEN_FOR_TELECALLER = ["/operations", "/stock-position", "/country-comparison", "/investments", "/instagram", "/sales-overview", "/team-leaders", "/leads", "/campaigns", "/tasks", "/performance", "/reports"];
+  // team-leaders/reports/performance/leads all pull from the unscoped,
+  // company-wide sheets-data endpoint (every branch, every team leader) —
+  // a Team Leader has their own scoped dashboard/leads-update pages instead.
+  const HIDDEN_FOR_TL = ["/operations", "/stock-position", "/country-comparison", "/investments", "/instagram", "/sales-overview", "/sales-reports", "/team-leaders", "/reports", "/performance", "/leads"];
+  const HIDDEN_FOR_TELECALLER = ["/operations", "/stock-position", "/country-comparison", "/investments", "/instagram", "/sales-overview", "/sales-reports", "/team-leaders", "/leads", "/campaigns", "/tasks", "/performance", "/reports"];
 
   const visibleMainItems = MAIN_NAV_ITEMS.filter((item) => {
     if (!hasPermission(item.resource, "view")) return false;

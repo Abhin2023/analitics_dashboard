@@ -5,10 +5,12 @@ import { useAuthStore } from "../lib/authStore";
 
 export function useSocketRefresh(queryKeys?: string[]) {
   const queryClient = useQueryClient();
-  const token = useAuthStore((s) => s.token);
+  // Presence, not value — a silent token refresh shouldn't tear down and
+  // re-subscribe the listener.
+  const isAuthenticated = useAuthStore((s) => !!s.token);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
 
     const socket = getSocket();
 
@@ -26,5 +28,5 @@ export function useSocketRefresh(queryKeys?: string[]) {
     return () => {
       socket.off("data:refresh", handleRefresh);
     };
-  }, [token, queryClient, queryKeys]);
+  }, [isAuthenticated, queryClient, queryKeys]);
 }

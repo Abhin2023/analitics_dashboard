@@ -216,7 +216,38 @@ export default function TelecallerDashboard() {
         {recent_leads.length > 0 && (
           <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5">
             <h3 className="text-sm font-semibold text-white mb-4">Recent Leads</h3>
-            <div className="overflow-x-auto">
+
+            {/* Mobile cards */}
+            <div className="md:hidden -mx-5 divide-y divide-[var(--border-subtle)]">
+              {recent_leads.map((l: any) => (
+                <div key={l.id} className="px-5 py-3 space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-white truncate">{l.full_name}</p>
+                      {l.phone && (
+                        <a href={`tel:${l.phone}`} className="text-xs text-[var(--accent-blue)]">{l.phone}</a>
+                      )}
+                    </div>
+                    <span
+                      className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{
+                        backgroundColor: `${STATUS_COLORS[l.status] || "#64748b"}15`,
+                        color: STATUS_COLORS[l.status] || "#64748b",
+                        border: `1px solid ${STATUS_COLORS[l.status] || "#64748b"}30`,
+                      }}
+                    >
+                      {l.status}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {l.lead_source} · {l.sheet_tl_name} · {l.call_date}
+                  </p>
+                  {l.remarks && <p className="text-xs text-[var(--text-secondary)] truncate">{l.remarks}</p>}
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-[var(--text-muted)] uppercase tracking-wider border-b border-[var(--border-subtle)]">
