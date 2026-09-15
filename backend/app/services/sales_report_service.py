@@ -89,7 +89,7 @@ async def get_sales_report(
             "start": start_date.isoformat(), "end": end_date.isoformat(), "granularity": granularity,
             "total_revenue": 0, "total_target": 0, "achievement_pct": 0,
             "total_walkins": 0, "total_conversions": 0,
-            "trend": [], "breakdown": [], "needs_review": [],
+            "trend": [], "breakdown": [], "needs_review": [], "top_branch": None,
         }
 
     india_store_ids = [sid for sid, (s, _) in stores_by_id.items() if s.country == "India"]
@@ -169,6 +169,22 @@ async def get_sales_report(
         breakdown.append(g)
     breakdown.sort(key=lambda x: x["revenue"], reverse=True)
 
+    # Top branch by revenue for this exact period — computed by branch name
+    # regardless of the requested group_by, so "who's #1 right now" is always
+    # available even when viewing the team-leader/region/all-together rollup.
+    branch_totals: dict[str, dict] = {}
+    for sid in confirmed_ids:
+        store, _ = stores_by_id[sid]
+        b = branch_totals.setdefault(store.name, {"name": store.name, "revenue": 0.0, "target": 0.0})
+        b["revenue"] += per_store[sid]["revenue"]
+        b["target"] += per_store[sid]["target"]
+    top_branch = None
+    if branch_totals:
+        top_branch = max(branch_totals.values(), key=lambda x: x["revenue"])
+        top_branch["achievement_pct"] = (
+            round(top_branch["revenue"] / top_branch["target"] * 100, 1) if top_branch["target"] > 0 else 0
+        )
+
     needs_review = []
     for sid in review_ids:
         store, _ = stores_by_id[sid]
@@ -185,4 +201,5 @@ async def get_sales_report(
         "achievement_pct": round(total_revenue / total_target * 100, 1) if total_target > 0 else 0,
         "total_walkins": total_walkins, "total_conversions": total_conversions,
         "trend": trend, "breakdown": breakdown, "needs_review": needs_review,
+        "top_branch": top_branch,
     }

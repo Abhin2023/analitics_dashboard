@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/apiClient";
+import { localDateStr } from "@/lib/utils";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -33,9 +34,6 @@ function shortStore(name: string) {
     .replace("Delhi ", "").replace(" Lajpat Nagar", "").replace(" Mall", "").trim();
 }
 
-function localDateStr(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 function startOfLocalMonth() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), 1);

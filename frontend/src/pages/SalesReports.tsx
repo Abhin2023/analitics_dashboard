@@ -1,13 +1,43 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/apiClient";
+import { localDateStr } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
-import { BarChart3, Calendar, CalendarDays, CalendarRange, AlertTriangle, Users, Store, MapPin, Layers } from "lucide-react";
+import { BarChart3, Calendar, CalendarDays, CalendarRange, AlertTriangle, Users, Store, MapPin, Layers, Trophy } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 type Granularity = "day" | "week" | "month";
 type GroupBy = "none" | "team_leader" | "branch" | "region";
+type RangePreset = "today" | "7day" | "month" | "custom";
+
+const RANGE_OPTIONS: { key: RangePreset; label: string }[] = [
+  { key: "today", label: "Today (1 Day)" },
+  { key: "7day", label: "Last 7 Days" },
+  { key: "month", label: "This Month" },
+  { key: "custom", label: "Custom Range" },
+];
+
+// Resolves a range preset to explicit start/end dates. Custom range is
+// handled by the caller once both date inputs are filled in.
+function resolveRange(preset: RangePreset): { start: string; end: string } | null {
+  const today = new Date();
+  if (preset === "today") {
+    const d = localDateStr(today);
+    return { start: d, end: d };
+  }
+  if (preset === "7day") {
+    const from = new Date(today);
+    from.setDate(from.getDate() - 6);
+    return { start: localDateStr(from), end: localDateStr(today) };
+  }
+  if (preset === "month") {
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { start: localDateStr(start), end: localDateStr(end) };
+  }
+  return null;
+}
 
 function fmtINR(n: number) {
   if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
@@ -30,36 +60,60 @@ const GROUP_BY_OPTIONS: { key: GroupBy; label: string; icon: any }[] = [
 ];
 
 export default function SalesReports() {
+  const [rangePreset, setRangePreset] = useState<RangePreset>("month");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [granularity, setGranularity] = useState<Granularity>("month");
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [country, setCountry] = useState("");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const requestSeq = useRef(0);
+
+  const selectRange = (preset: RangePreset) => {
+    setRangePreset(preset);
+    if (preset === "today") setGranularity("day");
+    else if (preset === "7day") setGranularity("day");
+    else if (preset === "month") setGranularity("month");
+  };
+
+  const effectiveRange = rangePreset === "custom"
+    ? (customStart && customEnd ? { start: customStart, end: customEnd } : null)
+    : resolveRange(rangePreset);
 
   const fetchReport = useCallback(async () => {
+    if (rangePreset === "custom" && !effectiveRange) return;
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams({ granularity, group_by: groupBy });
       if (country) params.set("country", country);
+      if (effectiveRange) {
+        params.set("start", effectiveRange.start);
+        params.set("end", effectiveRange.end);
+      }
       const res = await api.fetchRaw(`/sales-reports?${params.toString()}`);
+      if (seq !== requestSeq.current) return; // a newer request already superseded this one
       if (res.ok) {
         setData(await res.json());
       } else {
         setError("Failed to load sales report");
       }
     } catch {
-      setError("Failed to load sales report");
+      if (seq === requestSeq.current) setError("Failed to load sales report");
     }
-    setLoading(false);
-  }, [granularity, groupBy, country]);
+    if (seq === requestSeq.current) setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [granularity, groupBy, country, rangePreset, customStart, customEnd]);
 
   useEffect(() => { fetchReport(); }, [fetchReport]);
 
   const breakdown = data?.breakdown || [];
   const trend = data?.trend || [];
   const needsReview = data?.needs_review || [];
+  const topBranch = data?.top_branch || null;
 
   return (
     <ErrorBoundary>
@@ -72,6 +126,43 @@ export default function SalesReports() {
           <p className="text-sm text-[var(--text-muted)] mt-1">
             {data ? `${data.start} to ${data.end}` : "Combined MCP + Sheets sales, day / week / month, by team leader, branch, or region"}
           </p>
+        </div>
+
+        {/* Date range */}
+        <div className="flex flex-wrap items-center gap-2">
+          {RANGE_OPTIONS.map((opt) => {
+            const active = rangePreset === opt.key;
+            return (
+              <button
+                key={opt.key}
+                onClick={() => selectRange(opt.key)}
+                className={`text-xs px-3.5 py-2 rounded-xl border transition-colors ${
+                  active
+                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                    : "bg-[var(--bg-card)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-white/5"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+          {rangePreset === "custom" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none"
+              />
+              <span className="text-xs text-[var(--text-muted)]">to</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] text-xs text-white focus:outline-none"
+              />
+            </div>
+          )}
         </div>
 
         {/* Granularity toggle */}
@@ -145,6 +236,27 @@ export default function SalesReports() {
           </div>
         )}
 
+        {/* Top branch for the selected period */}
+        {topBranch && (
+          <div className="flex items-center gap-4 p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-transparent">
+            <div className="h-12 w-12 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <Trophy size={24} className="text-amber-400" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] uppercase tracking-wider text-amber-300/80 font-semibold">
+                Top Branch — {data.start === data.end ? data.start : `${data.start} to ${data.end}`}
+              </p>
+              <p className="text-lg font-extrabold text-white">{topBranch.name}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xl font-extrabold text-white">{fmtINR(topBranch.revenue)}</p>
+              <p className="text-xs text-[var(--text-muted)]">
+                {topBranch.target > 0 ? `${topBranch.achievement_pct}% of target` : "revenue"}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Summary KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
           {[
@@ -207,7 +319,12 @@ export default function SalesReports() {
                 <tbody className="divide-y divide-[var(--border-subtle)]">
                   {breakdown.map((row: any, i: number) => (
                     <tr key={i} className="hover:bg-[var(--bg-card-hover)] transition-colors">
-                      <td className="py-3.5 px-4 font-semibold text-white">{row.key}</td>
+                      <td className="py-3.5 px-4 font-semibold text-white">
+                        <span className="inline-flex items-center gap-1.5">
+                          {groupBy === "branch" && i === 0 && <Trophy size={13} className="text-amber-400" />}
+                          {row.key}
+                        </span>
+                      </td>
                       <td className="py-3.5 px-4 text-right text-[var(--text-secondary)]">{row.store_count}</td>
                       <td className="py-3.5 px-4 text-right font-semibold text-white">{fmtINR(row.revenue)}</td>
                       <td className="py-3.5 px-4 text-right text-[var(--text-secondary)]">{fmtINR(row.target)}</td>
