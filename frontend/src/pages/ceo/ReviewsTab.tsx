@@ -94,7 +94,7 @@ export function ReviewsTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" domain={[3.5, 5.2]} tick={{ fill: "#64748b", fontSize: 10 }} />
               <YAxis type="category" dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} width={110} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="rating" radius={[0, 4, 4, 0]}>
                 {barData.map((r: any, i: number) => <Cell key={i} fill={r.rating >= 4.8 ? "#10b981" : r.rating >= 4.5 ? "#3b82f6" : r.rating >= 4.3 ? "#f59e0b" : "#ef4444"} />)}
               </Bar>
@@ -109,7 +109,7 @@ export function ReviewsTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" tick={{ fill: "#64748b", fontSize: 10 }} />
               <YAxis type="category" dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} width={110} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="reviews" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>

@@ -75,7 +75,7 @@ export function OverviewTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" domain={[0, 120]} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
               <YAxis type="category" dataKey="store" tick={{ fill: "#94a3b8", fontSize: 9 }} width={130} tickFormatter={shortStore} />
-              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="achPct" radius={[0, 4, 4, 0]}>
                 {ops.storeAchievements.map((s, i) => (
                   <Cell key={i} fill={ragColor(s.achPct)} />
@@ -94,7 +94,7 @@ export function OverviewTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="achPct" radius={[6, 6, 0, 0]}>
                 {tlChartData.map((t, i) => (
                   <Cell key={i} fill={ragColor(t.achPct)} />
@@ -116,7 +116,7 @@ export function OverviewTab({ data }: { data: any }) {
                   <Cell key={i} fill={["#10b981", "#f59e0b", "#ef4444"][i]} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
             </PieChart>
           </ResponsiveContainer>
@@ -129,7 +129,7 @@ export function OverviewTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" tick={{ fill: "#64748b", fontSize: 10 }} />
               <YAxis type="category" dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} width={100} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="walkins" fill="#25d366" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -142,7 +142,7 @@ export function OverviewTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `₹${v}L`} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} formatter={(v: any) => `₹${v}L`} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} formatter={(v: any) => `₹${v}L`} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
               <Bar dataKey="target" fill="#374151" radius={[4, 4, 0, 0]} />
               <Bar dataKey="achieved" fill="#3b82f6" radius={[4, 4, 0, 0]} />

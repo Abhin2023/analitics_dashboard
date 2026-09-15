@@ -93,7 +93,9 @@ function SectionChartCard({ def }: { def: ChartDef }) {
   const [filter, setFilter] = useState<CardFilterState>(DEFAULT_CARD_FILTER);
   const fmt = chartFormatter(def.unit);
   const tickFill = { fontSize: 10, fill: "#a1a1aa" };
-  const tooltipStyle = { backgroundColor: "#11131e", borderColor: "rgba(255,255,255,0.1)", borderRadius: "12px", fontSize: "12px" };
+  const tooltipStyle = { backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" };
+  const tooltipLabelStyle = { color: "var(--text-primary)" };
+  const tooltipItemStyle = { color: "var(--text-primary)" };
   const hasPctAxis = def.series.some((s) => s.yAxisId === "pct");
 
   // Extract entity options (e.g. stores, names, or categories)
@@ -157,7 +159,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis tick={tickFill} tickFormatter={fmt} width={70} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmt(v)} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} formatter={(v: any) => fmt(v)} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />
               {def.series.map((s) => (
                 <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2.5} dot={{ r: 2.5, fill: s.color }} activeDot={{ r: 5 }} />
@@ -174,7 +176,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis tick={tickFill} tickFormatter={fmt} width={70} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmt(v)} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} formatter={(v: any) => fmt(v)} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />
               {def.series.map((s) => (
                 <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[4, 4, 0, 0]} stackId={def.stacked ? "a" : undefined} />
@@ -188,7 +190,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis type="number" tick={tickFill} tickFormatter={fmt} />
               <YAxis type="category" dataKey={def.xKey} tick={tickFill} width={130} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmt(v)} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} formatter={(v: any) => fmt(v)} />
               {def.series.map((s) => (
                 <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[0, 4, 4, 0]} />
               ))}
@@ -213,7 +215,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
                     return <Cell key={i} fill={color} />;
                   })}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} />
+                <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
                 <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />
               </PieChart>
             </ResponsiveContainer>
@@ -227,7 +229,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
               {def.series.map((s) => (
                 <Radar key={s.key} dataKey={s.key} name={s.name} stroke={s.color} fill={s.color} fillOpacity={0.35} />
               ))}
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fmt(v)} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} formatter={(v: any) => fmt(v)} />
             </RadarChart>
           </ResponsiveContainer>
         )}
@@ -238,7 +240,7 @@ function SectionChartCard({ def }: { def: ChartDef }) {
               <XAxis dataKey={def.xKey} tick={tickFill} />
               <YAxis yAxisId="main" tick={tickFill} tickFormatter={fmt} width={70} />
               {hasPctAxis && <YAxis yAxisId="pct" orientation="right" tick={tickFill} tickFormatter={(v: any) => `${v}%`} width={40} />}
-              <Tooltip contentStyle={tooltipStyle} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />
               {def.series.map((s) =>
                 s.kind === "line" ? (

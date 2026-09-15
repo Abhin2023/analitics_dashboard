@@ -65,7 +65,7 @@ export function TLWiseTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `₹${v}L`} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} formatter={(v: any) => `₹${v}L`} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} formatter={(v: any) => `₹${v}L`} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
               <Bar dataKey="target" fill="#374151" radius={[4, 4, 0, 0]} />
               <Bar dataKey="achieved" fill="#3b82f6" radius={[4, 4, 0, 0]} />
@@ -80,7 +80,7 @@ export function TLWiseTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} formatter={(v: any) => `${v}%`} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} formatter={(v: any) => `${v}%`} />
               <Bar dataKey="convPct" radius={[6, 6, 0, 0]}>
                 {ops.tlList.map((t, i) => <Cell key={i} fill={ragColor(t.convPct)} />)}
               </Bar>

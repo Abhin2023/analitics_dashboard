@@ -288,7 +288,9 @@ export default function SalesReports() {
                 <XAxis dataKey="period" tick={{ fontSize: 10, fill: "#a1a1aa" }} />
                 <YAxis tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => formatByCountry(v, displayCountry)} width={70} />
                 <Tooltip
-                  contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
+                  contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 8 }}
+                  labelStyle={{ color: "var(--text-primary)" }}
+                  itemStyle={{ color: "var(--text-primary)" }}
                   formatter={(v: any) => formatByCountry(Number(v), displayCountry)}
                 />
                 <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6" }} />

@@ -122,8 +122,9 @@ export default function CountryComparison() {
                 <YAxis type="category" dataKey="country" width={100} stroke="#666" tick={{ fill: "#fff", fontSize: 12 }} />
                 <Tooltip
                   formatter={(v) => [`$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, "USD"]}
-                  contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                  labelStyle={{ color: "#fff" }}
+                  contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 8 }}
+                  labelStyle={{ color: "var(--text-primary)" }}
+                  itemStyle={{ color: "var(--text-primary)" }}
                 />
                 <Bar dataKey="usd_amount" radius={[0, 6, 6, 0]}>
                   {data.map((entry) => (

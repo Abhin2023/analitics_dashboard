@@ -188,7 +188,7 @@ export function ActionCenterTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} />
               <YAxis domain={[0, 100]} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => v + "%"} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} formatter={(v: any) => v + "%"} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} formatter={(v: any) => v + "%"} />
               <Bar dataKey="avgAch" radius={[4, 4, 0, 0]}>
                 {branchData.map((b, i) => <Cell key={i} fill={ragColor(b.avgAch)} />)}
               </Bar>
@@ -203,7 +203,7 @@ export function ActionCenterTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => "Rs" + v + "L"} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} formatter={(v: any) => "Rs" + v + "L"} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} formatter={(v: any) => "Rs" + v + "L"} />
               <Bar dataKey="gap" radius={[4, 4, 0, 0]}>
                 {tlGapData.map((t, i) => <Cell key={i} fill={t.gap > 10 ? "#ef4444" : t.gap > 5 ? "#f59e0b" : "#10b981"} />)}
               </Bar>
@@ -218,7 +218,7 @@ export function ActionCenterTab({ data }: { data: any }) {
               <Pie data={mktEffData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} dataKey="value" stroke="#1e2336" strokeWidth={2}>
                 {mktEffData.map((_, i) => <Cell key={i} fill={["#10b981", "#f59e0b", "#ef4444"][i]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Legend wrapperStyle={{ fontSize: 10, color: "#94a3b8" }} />
             </PieChart>
           </ResponsiveContainer>

@@ -85,7 +85,7 @@ export function DailyOpsTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" domain={[0, 120]} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
               <YAxis type="category" dataKey="store" tick={{ fill: "#94a3b8", fontSize: 9 }} width={130} tickFormatter={shortStore} />
-              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="achPct" radius={[0, 4, 4, 0]}>
                 {ops.storeAchievements.map((s, i) => <Cell key={i} fill={ragColor(s.achPct)} />)}
               </Bar>
@@ -100,7 +100,7 @@ export function DailyOpsTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="store" tick={{ fill: "#94a3b8", fontSize: 9 }} tickFormatter={shortStore} angle={-45} textAnchor="end" height={80} />
               <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
               <Bar dataKey="walkins" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               <Bar dataKey="sales" fill="#10b981" radius={[4, 4, 0, 0]} />

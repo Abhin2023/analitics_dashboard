@@ -204,7 +204,7 @@ export function MarketingTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" tick={{ fill: "#64748b", fontSize: 10 }} />
               <YAxis type="category" dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} width={100} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
               <Bar dataKey="views" fill="#E1306C" radius={[0, 4, 4, 0]} />
               <Bar dataKey="likes" fill="#a855f7" radius={[0, 4, 4, 0]} />
@@ -219,7 +219,7 @@ export function MarketingTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis type="number" tick={{ fill: "#64748b", fontSize: 10 }} />
               <YAxis type="category" dataKey="name" tick={{ fill: "#94a3b8", fontSize: 9 }} width={100} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
               <Bar dataKey="chats" fill="#25d366" radius={[0, 4, 4, 0]} />
               <Bar dataKey="walkins" fill="#3b82f6" radius={[0, 4, 4, 0]} />
@@ -237,7 +237,7 @@ export function MarketingTab({ data }: { data: any }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
               <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
               <YAxis tick={{ fill: "#64748b", fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: "#1e2336", border: "1px solid #2d3748" }} />
+              <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
               <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                 {platformData.map((p, i) => <Cell key={i} fill={p.color} />)}
               </Bar>

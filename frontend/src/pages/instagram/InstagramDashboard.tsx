@@ -97,8 +97,9 @@ export default function InstagramDashboard() {
                   <XAxis dataKey="name" tick={{ fill: "#a1a1aa", fontSize: 11 }} />
                   <YAxis tick={{ fill: "#a1a1aa", fontSize: 11 }} />
                   <Tooltip
-                    contentStyle={{ background: "#1a1b2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: "#fff" }}
+                    contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: "var(--text-primary)" }}
+                    itemStyle={{ color: "var(--text-primary)" }}
                   />
                   <Bar dataKey="tokens" fill="#8b5cf6" radius={[4, 4, 0, 0]} name="Tokens Used" />
                   <Bar dataKey="calls" fill="#06b6d4" radius={[4, 4, 0, 0]} name="API Calls" />
@@ -134,7 +135,9 @@ export default function InstagramDashboard() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: "#1a1b2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: "var(--text-primary)" }}
+                    itemStyle={{ color: "var(--text-primary)" }}
                   />
                 </PieChart>
               </ResponsiveContainer>

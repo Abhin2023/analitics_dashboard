@@ -94,7 +94,9 @@ export default function TeamLeaderDashboard() {
                 <XAxis type="number" tick={{ fill: "#94a3b8", fontSize: 11 }} tickFormatter={(v) => fmtINR(v)} />
                 <YAxis dataKey="name" type="category" width={100} tick={{ fill: "#94a3b8", fontSize: 11 }} />
                 <Tooltip
-                  contentStyle={{ background: "#1e293b", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 12 }}
+                  contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12 }}
+                  labelStyle={{ color: "var(--text-primary)" }}
+                  itemStyle={{ color: "var(--text-primary)" }}
                   formatter={(val: any) => fmtINR(Number(val))}
                 />
                 <Bar dataKey="target" fill="rgba(148,163,184,0.2)" radius={[0, 4, 4, 0]} name="Target" />
@@ -123,7 +125,9 @@ export default function TeamLeaderDashboard() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ background: "#1e293b", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 12 }}
+                      contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12 }}
+                      labelStyle={{ color: "var(--text-primary)" }}
+                      itemStyle={{ color: "var(--text-primary)" }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -239,7 +243,9 @@ export default function TeamLeaderDashboard() {
                 />
                 <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} tickFormatter={(v) => fmtINR(v)} />
                 <Tooltip
-                  contentStyle={{ background: "#1e293b", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 12 }}
+                  contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12 }}
+                  labelStyle={{ color: "var(--text-primary)" }}
+                  itemStyle={{ color: "var(--text-primary)" }}
                   formatter={(val: any) => fmtINR(Number(val))}
                   labelFormatter={(d: any) => new Date(d).toLocaleDateString("en-IN")}
                 />
