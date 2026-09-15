@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import re
 from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,11 +16,29 @@ logger = logging.getLogger(__name__)
 
 LAST_SYNC_SETTING_KEY = "last_mcp_sync_at"
 
+# Serializes the "does this MCP shop already have a Store row?" check-then-
+# create below across concurrent sync calls in this process (e.g. two Sales
+# Reports page loads that both trigger a lazy backfill at the same moment).
+# Without this, two overlapping calls can both see "no existing store" for
+# the same shop and both INSERT, producing exact-duplicate Store rows each
+# flagged needs_review — see scripts/dedupe_mcp_stores.py for the cleanup
+# tool written for exactly that failure mode.
+_store_match_lock = asyncio.Lock()
+
+
+def _normalize_shop_name(name: str) -> str:
+    """Collapse whitespace and normalize hyphen spacing so minor formatting
+    differences from the MCP source (e.g. 'Solution -Guwahati' vs
+    'Solution - Guwahati') don't get treated as distinct shops."""
+    normalized = re.sub(r"\s*-\s*", " - ", name.strip())
+    return re.sub(r"\s+", " ", normalized).strip()
+
 
 def _extract_city_token(mcp_shop_name: str) -> str:
     """MCP shop names look like 'Heavenly Treasure - Velachery' — the token
     after the last ' - ' is usually the city/branch identifier that can be
-    matched against an existing Sheets-sourced Store name."""
+    matched against an existing Sheets-sourced Store name. Assumes
+    mcp_shop_name has already been run through _normalize_shop_name."""
     if " - " in mcp_shop_name:
         return mcp_shop_name.rsplit(" - ", 1)[-1].strip().lower()
     return mcp_shop_name.strip().lower()
@@ -28,48 +48,51 @@ async def _match_or_create_store(
     db: AsyncSession, mcp_shop_name: str, country_id: int, country_name: str
 ) -> tuple[Store, bool]:
     """Resolve an MCP shop name to a Store row. Returns (store, created)."""
-    result = await db.execute(
-        select(Store).where(Store.mcp_shop_name == mcp_shop_name).order_by(Store.id)
-    )
-    matches = result.scalars().all()
-    if matches:
-        if len(matches) > 1:
-            logger.warning(
-                "Duplicate stores share mcp_shop_name=%r (ids=%s) — using the oldest, "
-                "ignoring the rest. Run scripts/dedupe_mcp_stores.py to clean this up.",
-                mcp_shop_name, [s.id for s in matches],
-            )
-        return matches[0], False
+    mcp_shop_name = _normalize_shop_name(mcp_shop_name)
 
-    if country_id == 1:
-        # Try to match an existing India store (created by the Sheets sync)
-        # by its city/branch token, since MCP and Sheets use different
-        # naming conventions for the same physical branch.
-        token = _extract_city_token(mcp_shop_name)
-        candidates = (await db.execute(
-            select(Store).where(Store.country == "India", Store.mcp_shop_name.is_(None))
-        )).scalars().all()
-        matches = [s for s in candidates if token and token in s.name.lower()]
-        if len(matches) == 1:
-            matches[0].mcp_shop_name = mcp_shop_name
-            matches[0].mcp_country_id = country_id
+    async with _store_match_lock:
+        result = await db.execute(
+            select(Store).where(Store.mcp_shop_name == mcp_shop_name).order_by(Store.id)
+        )
+        matches = result.scalars().all()
+        if matches:
+            if len(matches) > 1:
+                logger.warning(
+                    "Duplicate stores share mcp_shop_name=%r (ids=%s) — using the oldest, "
+                    "ignoring the rest. Run scripts/dedupe_mcp_stores.py to clean this up.",
+                    mcp_shop_name, [s.id for s in matches],
+                )
             return matches[0], False
-        # 0 or >1 matches: ambiguous, fall through to create a new store
-        # flagged for manual review rather than guessing.
 
-    placeholder_tl = await get_or_create_unassigned_tl(db)
-    store = Store(
-        name=mcp_shop_name,
-        team_leader_id=placeholder_tl.id,
-        country=country_name,
-        mcp_country_id=country_id,
-        mcp_shop_name=mcp_shop_name,
-        needs_review=True,
-        is_active=True,
-    )
-    db.add(store)
-    await db.flush()
-    return store, True
+        if country_id == 1:
+            # Try to match an existing India store (created by the Sheets sync)
+            # by its city/branch token, since MCP and Sheets use different
+            # naming conventions for the same physical branch.
+            token = _extract_city_token(mcp_shop_name)
+            candidates = (await db.execute(
+                select(Store).where(Store.country == "India", Store.mcp_shop_name.is_(None))
+            )).scalars().all()
+            matches = [s for s in candidates if token and token in s.name.lower()]
+            if len(matches) == 1:
+                matches[0].mcp_shop_name = mcp_shop_name
+                matches[0].mcp_country_id = country_id
+                return matches[0], False
+            # 0 or >1 matches: ambiguous, fall through to create a new store
+            # flagged for manual review rather than guessing.
+
+        placeholder_tl = await get_or_create_unassigned_tl(db)
+        store = Store(
+            name=mcp_shop_name,
+            team_leader_id=placeholder_tl.id,
+            country=country_name,
+            mcp_country_id=country_id,
+            mcp_shop_name=mcp_shop_name,
+            needs_review=True,
+            is_active=True,
+        )
+        db.add(store)
+        await db.flush()
+        return store, True
 
 
 async def _set_last_sync_time(db: AsyncSession) -> None:
