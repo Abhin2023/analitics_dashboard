@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { initClientLogger } from "./lib/clientLogger";
 import { ToastProvider } from "./components/shared/Toast";
+import { initTheme } from "./lib/theme";
 import "./index.css";
 
+initTheme();
 initClientLogger();
 
 const queryClient = new QueryClient({

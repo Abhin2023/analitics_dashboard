@@ -22,6 +22,26 @@
     --accent-teal: #06b6d4;
     --accent-red: #ef4444;
     --accent-yellow: #f59e0b;
+
+    color-scheme: dark;
+  }
+
+  /* Light theme — a soft off-white, not stark white, per design request.
+     Same token names as dark mode above, so every component that already
+     reads var(--bg-card)/var(--text-primary)/etc. re-skins automatically. */
+  :root[data-theme="light"] {
+    --bg-primary: #eeece5;
+    --bg-card: #f8f7f2;
+    --bg-card-hover: #efede5;
+    --bg-glass: rgba(248, 247, 242, 0.85);
+    --border-subtle: rgba(0, 0, 0, 0.09);
+    --border-glow: rgba(59, 130, 246, 0.25);
+
+    --text-primary: #1c1c1f;
+    --text-secondary: #52525b;
+    --text-muted: #6b6b72;
+
+    color-scheme: light;
   }
 
   * {
@@ -58,12 +78,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--border-subtle);
     border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--text-muted);
   }
 
   /* Input Focus Styling */
@@ -76,7 +96,48 @@
     box-shadow: 0 0 0 3px var(--accent-blue-glow) !important;
     outline: none !important;
   }
+
+  /* Every <select> in the app is styled with a dark background + light
+     text via Tailwind, but the browser renders the native option-list
+     popup with its own default (usually light) background and never
+     re-derives text color for it — so every dropdown's options render as
+     near-invisible light-on-light text until an option is hovered/selected.
+     Style the options explicitly instead of relying on inheritance. */
+  select option {
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+  }
 }
+
+/* Deliberately OUTSIDE any @layer: Tailwind's utility classes (text-white,
+   bg-white/N, border-white/N — used everywhere, tuned only for the dark
+   theme) live in its own "utilities" layer, which always wins over
+   anything in @layer base/components regardless of selector specificity.
+   Unlayered rules win over every layer, so these light-mode redirects have
+   to live unlayered to actually override those utilities instead of
+   rewriting every file that uses them. */
+:root[data-theme="light"] .text-white {
+  color: var(--text-primary);
+}
+:root[data-theme="light"] [class*="bg-white/"] {
+  background-color: rgba(0, 0, 0, 0.045);
+}
+:root[data-theme="light"] [class*="border-white/"] {
+  border-color: rgba(0, 0, 0, 0.09);
+}
+:root[data-theme="light"] [class*="hover:bg-white/"]:hover {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+/* Same reasoning for "active filter/tab" badges: they pair a pale -300
+   text shade with a matching translucent chip background, tuned to pop
+   against a dark card. On the light card the same pale text reads as
+   low-contrast pastel-on-pastel, so darken just the text in light mode. */
+:root[data-theme="light"] .text-emerald-300 { color: #047857; }
+:root[data-theme="light"] .text-blue-300 { color: #1d4ed8; }
+:root[data-theme="light"] .text-purple-300 { color: #7e22ce; }
+:root[data-theme="light"] .text-amber-300 { color: #b45309; }
+:root[data-theme="light"] .text-rose-300 { color: #be123c; }
 
 /* Keyframes are not layered (they don't participate in cascade) */
 @keyframes fadeIn {
@@ -109,7 +170,7 @@
   }
 
   .glass-card:hover {
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: var(--text-muted);
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
   }
 }

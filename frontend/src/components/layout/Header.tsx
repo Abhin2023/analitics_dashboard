@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/authStore";
 import { useUIStore } from "@/lib/uiStore";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { LogOut, Menu, User, ChevronRight } from "lucide-react";
+import { LogOut, Menu, User, ChevronRight, Sun, Moon } from "lucide-react";
+import { useTheme } from "@/lib/theme";
 
 const ROUTE_MAP: Record<string, { title: string; subtitle: string }> = {
   "/dashboard": { title: "Dashboard", subtitle: "Overview & Key Business Metrics" },
@@ -36,6 +37,7 @@ export function Header() {
   const toggleMobileMenu = useUIStore((s) => s.toggleMobileMenu);
   const location = useLocation();
   const [isMd, setIsMd] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const mql = window.matchMedia("(min-width: 768px)");
@@ -70,8 +72,8 @@ export function Header() {
         top: 0,
         zIndex: 30,
         height: "64px",
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        backgroundColor: "rgba(9, 10, 15, 0.95)",
+        borderBottom: "1px solid var(--border-subtle)",
+        backgroundColor: "var(--bg-glass)",
         backdropFilter: "blur(12px)",
         display: "flex",
         alignItems: "center",
@@ -88,9 +90,9 @@ export function Header() {
             style={{
               padding: "8px",
               borderRadius: "8px",
-              backgroundColor: "#11131e",
-              border: "1px solid rgba(255,255,255,0.08)",
-              color: "#a1a1aa",
+              backgroundColor: "var(--bg-card)",
+              border: "1px solid var(--border-subtle)",
+              color: "var(--text-secondary)",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
@@ -104,10 +106,10 @@ export function Header() {
         )}
 
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#71717a", fontWeight: 500 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-muted)", fontWeight: 500 }}>
             <span>BP Analytics</span>
-            <ChevronRight size={12} style={{ color: "#52525b" }} />
-            <span style={{ color: "#3b82f6", fontWeight: 600 }}>{currentRoute.title}</span>
+            <ChevronRight size={12} style={{ color: "var(--text-muted)" }} />
+            <span style={{ color: "var(--accent-blue)", fontWeight: 600 }}>{currentRoute.title}</span>
           </div>
           {hasTabs ? (
             <div style={{ display: "flex", alignItems: "center", gap: "16px", marginTop: "2px" }}>
@@ -116,7 +118,7 @@ export function Header() {
                 style={{
                   fontSize: "18px",
                   fontWeight: 700,
-                  color: currentTab === mainTabId ? "#fff" : "#71717a",
+                  color: currentTab === mainTabId ? "var(--text-primary)" : "var(--text-muted)",
                   background: "none",
                   border: "none",
                   padding: 0,
@@ -133,7 +135,7 @@ export function Header() {
                 style={{
                   fontSize: "18px",
                   fontWeight: 700,
-                  color: currentTab === secondTabId ? "#fff" : "#71717a",
+                  color: currentTab === secondTabId ? "var(--text-primary)" : "var(--text-muted)",
                   background: "none",
                   border: "none",
                   padding: 0,
@@ -151,7 +153,7 @@ export function Header() {
               style={{
                 fontSize: "18px",
                 fontWeight: 700,
-                color: "#fff",
+                color: "var(--text-primary)",
                 letterSpacing: "-0.01em",
                 lineHeight: 1.3,
                 margin: 0,
@@ -168,6 +170,26 @@ export function Header() {
 
       {/* Right: User Info & Logout */}
       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+        <button
+          onClick={toggleTheme}
+          style={{
+            padding: "8px",
+            borderRadius: "8px",
+            backgroundColor: "var(--bg-card)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label="Toggle theme"
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+
         {user?.role_name && (
           <span
             style={{
@@ -206,10 +228,10 @@ export function Header() {
         </div>
 
         <div className="hidden sm:flex" style={{ flexDirection: "column" }}>
-          <span style={{ fontSize: "13px", fontWeight: 600, color: "#fff", lineHeight: 1.3 }}>
+          <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.3 }}>
             {user?.name || "User"}
           </span>
-          <span style={{ fontSize: "11px", color: "#71717a", lineHeight: 1.3 }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)", lineHeight: 1.3 }}>
             {user?.role_name || ""}
           </span>
         </div>
@@ -224,9 +246,9 @@ export function Header() {
             fontSize: "12px",
             fontWeight: 500,
             borderRadius: "8px",
-            border: "1px solid rgba(255,255,255,0.08)",
-            backgroundColor: "#11131e",
-            color: "#a1a1aa",
+            border: "1px solid var(--border-subtle)",
+            backgroundColor: "var(--bg-card)",
+            color: "var(--text-secondary)",
             cursor: "pointer",
             transition: "all 0.2s",
             whiteSpace: "nowrap",
@@ -237,9 +259,9 @@ export function Header() {
             e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.08)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = "#a1a1aa";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
-            e.currentTarget.style.backgroundColor = "#11131e";
+            e.currentTarget.style.color = "var(--text-secondary)";
+            e.currentTarget.style.borderColor = "var(--border-subtle)";
+            e.currentTarget.style.backgroundColor = "var(--bg-card)";
           }}
           title="Sign out"
         >

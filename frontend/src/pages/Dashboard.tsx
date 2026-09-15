@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { api } from "@/lib/apiClient";
 import { localDateStr } from "@/lib/utils";
 import { formatByCountry as fmtByCountry } from "@/lib/formatMoney";
@@ -17,7 +17,6 @@ import {
 } from "recharts";
 import { useSocketRefresh } from "../hooks/useSocketRefresh";
 import { AISummary } from "@/components/dashboard/AISummary";
-import { processOpsData } from "@/pages/ceo/types";
 import {
   CardFilterPopover,
   CardFilterState,
@@ -79,6 +78,16 @@ export default function Dashboard() {
   const [mcpLiveLoading, setMcpLiveLoading] = useState(false);
   const [countryData, setCountryData] = useState<any[]>([]);
   const [countryLoading, setCountryLoading] = useState(false);
+  // India revenue/target/achievement, live from MCP (McpDailySale) joined to
+  // Store.team_leader_id — replaces the old Sheets-only ops_data source so
+  // these cards work for Today/7 Days too, not just ranges a Team Leader
+  // happened to submit a sheet row for. Walk-ins/conversions still come
+  // from Sheets under the hood (MCP has no funnel data), blended in by the
+  // same /sales-reports endpoint.
+  const [mcpTlReport, setMcpTlReport] = useState<any>(null);
+  const [mcpBranchReport, setMcpBranchReport] = useState<any>(null);
+  const [mcpReportLoading, setMcpReportLoading] = useState(true);
+  const [mcpReportError, setMcpReportError] = useState("");
   const [stockData, setStockData] = useState<any[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockError, setStockError] = useState("");
@@ -164,6 +173,24 @@ export default function Dashboard() {
     setCountryLoading(false);
   }, [effectiveRange]);
 
+  const fetchMcpReports = useCallback(async () => {
+    setMcpReportLoading(true);
+    setMcpReportError("");
+    try {
+      const params = `granularity=day&country=India&start=${effectiveRange.from}&end=${effectiveRange.to}`;
+      const [tlRes, branchRes] = await Promise.all([
+        api.fetchRaw(`/sales-reports?group_by=team_leader&${params}`),
+        api.fetchRaw(`/sales-reports?group_by=branch&${params}`),
+      ]);
+      if (tlRes.ok) setMcpTlReport(await tlRes.json());
+      else setMcpReportError("Couldn't load live sales data.");
+      if (branchRes.ok) setMcpBranchReport(await branchRes.json());
+    } catch {
+      setMcpReportError("Couldn't load live sales data.");
+    }
+    setMcpReportLoading(false);
+  }, [effectiveRange]);
+
   const fetchStock = useCallback(async () => {
     setStockLoading(true);
     setStockError("");
@@ -213,6 +240,7 @@ export default function Dashboard() {
       await Promise.all([
         fetchMcpLive(),
         fetchCountryComparison(),
+        fetchMcpReports(),
         fetchBranches(),
         fetchStock(),
         fetchSyncStatus(),
@@ -221,15 +249,16 @@ export default function Dashboard() {
       setSyncError(e.message || "Sync failed");
     }
     setSyncing(false);
-  }, [fetchMcpLive, fetchCountryComparison, fetchBranches, fetchStock, fetchSyncStatus]);
+  }, [fetchMcpLive, fetchCountryComparison, fetchMcpReports, fetchBranches, fetchStock, fetchSyncStatus]);
 
   useEffect(() => {
     fetchSheets();
     fetchMcpLive();
     fetchCountryComparison();
+    fetchMcpReports();
     fetchBranches();
     fetchSyncStatus();
-  }, [fetchSheets, fetchMcpLive, fetchCountryComparison, fetchBranches, fetchSyncStatus]);
+  }, [fetchSheets, fetchMcpLive, fetchCountryComparison, fetchMcpReports, fetchBranches, fetchSyncStatus]);
 
   useEffect(() => {
     fetchStock();
@@ -238,7 +267,53 @@ export default function Dashboard() {
   const activeData = sheetsData;
   const activeLoading = sheetsLoading;
 
-  const ops = processOpsData(activeData?.ops_data || []);
+  // Same shape as the old Sheets-only processOpsData() result, but built
+  // from the live MCP sales report (McpDailySale joined to
+  // Store.team_leader_id) so it's populated for Today/7 Days too — Sheets
+  // submissions are sparse/manual and often have nothing for a narrow
+  // recent window even though real sales happened. Walk-ins/conversions
+  // still come from Sheets under the hood; /sales-reports already blends
+  // that in per store, so nothing else has to change here.
+  const ops = useMemo(() => {
+    if (!mcpTlReport || !mcpBranchReport) return null;
+
+    const storeAchievements = (mcpBranchReport.breakdown || [])
+      .map((r: any) => ({
+        store: r.key, mtd: r.revenue, target: r.target, achPct: r.achievement_pct,
+        walkins: r.walkins, sales: r.conversions,
+        convPct: r.walkins > 0 ? Math.round((r.conversions / r.walkins) * 100) : 0,
+      }))
+      .sort((a: any, b: any) => b.achPct - a.achPct);
+
+    const TL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#06b6d4", "#f97316"];
+    const tlList = (mcpTlReport.breakdown || [])
+      .map((r: any, i: number) => ({
+        name: r.key, target: r.target, achieved: r.revenue,
+        walkins: r.walkins, conv: r.conversions, stores: r.stores || [],
+        achPct: r.achievement_pct,
+        convPct: r.walkins > 0 ? Math.round((r.conversions / r.walkins) * 100) : 0,
+        color: TL_COLORS[i % TL_COLORS.length],
+      }))
+      .sort((a: any, b: any) => b.achPct - a.achPct);
+
+    const rag = { green: 0, amber: 0, red: 0 };
+    for (const sa of storeAchievements) {
+      if (sa.achPct >= 65) rag.green++;
+      else if (sa.achPct >= 35) rag.amber++;
+      else rag.red++;
+    }
+
+    return {
+      storeAchievements, tlList,
+      totalRevenue: mcpTlReport.total_revenue, totalTarget: mcpTlReport.total_target,
+      totalWalkins: mcpTlReport.total_walkins, totalConversions: mcpTlReport.total_conversions,
+      overallAch: mcpTlReport.achievement_pct,
+      overallConv: mcpTlReport.total_walkins > 0
+        ? Math.round((mcpTlReport.total_conversions / mcpTlReport.total_walkins) * 100) : 0,
+      rag,
+      needsReview: mcpBranchReport.needs_review || [],
+    };
+  }, [mcpTlReport, mcpBranchReport]);
 
   // Today's live revenue from MCP
   const todayStr = localDateStr(new Date());
@@ -263,13 +338,10 @@ export default function Dashboard() {
   // monthly_target by the range length), so the daily pace is just that
   // total divided evenly across the days in the range.
   const revenueTrend = useMemo(() => {
-    const opsData = activeData?.ops_data || [];
     if (!kpiData) return [];
     const dateMap: Record<string, number> = {};
-    for (const r of opsData) {
-      if (r.date) {
-        dateMap[r.date] = (dateMap[r.date] || 0) + (r.revenue || 0);
-      }
+    for (const r of (mcpTlReport?.trend || [])) {
+      dateMap[r.period] = (dateMap[r.period] || 0) + (r.revenue || 0);
     }
     // Walk every day in the selected range, not just the days that had a
     // submission — otherwise a sparsely-synced period (e.g. one real day out
@@ -298,28 +370,21 @@ export default function Dashboard() {
         achievedPct: cumTarget > 0 ? Math.round((cumRevenue / cumTarget) * 100) : 0,
       };
     });
-  }, [activeData, kpiData, effectiveRange]);
+  }, [mcpTlReport, kpiData, effectiveRange]);
 
-  // Revenue breakdown by TL from ops_data
+  // Revenue breakdown by TL, from the live MCP team-leader report
   const revenueBreakdown = useMemo(() => {
-    const opsData = activeData?.ops_data || [];
-    if (!opsData.length) return [];
-    const tlMap: Record<string, number> = {};
-    for (const r of opsData) {
-      if (r.tl) {
-        tlMap[r.tl] = (tlMap[r.tl] || 0) + (r.revenue || 0);
-      }
-    }
-    return Object.entries(tlMap)
-      .map(([name, value]) => ({ name, value }))
-      .filter((x) => x.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [activeData]);
+    if (!ops) return [];
+    return ops.tlList
+      .map((tl: any) => ({ name: tl.name, value: tl.achieved }))
+      .filter((x: any) => x.value > 0)
+      .sort((a: any, b: any) => b.value - a.value);
+  }, [ops]);
 
   // Top team leaders from ops_data
   const topTeamLeaders = useMemo(() => {
     if (!ops) return [];
-    return ops.tlList.map((tl) => ({
+    return ops.tlList.map((tl: any) => ({
       name: tl.name,
       revenue: tl.achieved,
       target: tl.target,
@@ -615,11 +680,11 @@ export default function Dashboard() {
                 onFilterChange={setTrendFilter}
               />
             </div>
-            {sheetsLoading ? (
+            {mcpReportLoading ? (
               <div className="h-72 sm:h-80 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
             ) : !ops ? (
               <div className="h-72 sm:h-80 flex items-center justify-center text-sm text-[var(--text-muted)] text-center px-6">
-                No daily operations submitted for this period yet
+                {mcpReportError || "No sales data for this period yet"}
               </div>
             ) : (
               <div className="h-72 sm:h-80 w-full min-w-0">
@@ -668,11 +733,11 @@ export default function Dashboard() {
               <h3 className="text-base font-bold text-white tracking-tight">Overall Achievement Rate</h3>
               <p className="text-xs text-[var(--text-muted)] mb-4">Target fulfillment for the selected period</p>
             </div>
-            {sheetsLoading ? (
+            {mcpReportLoading ? (
               <div className="h-64 sm:h-72 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
             ) : !ops ? (
               <div className="h-64 sm:h-72 flex items-center justify-center text-sm text-[var(--text-muted)] text-center px-6">
-                No daily operations submitted for this period yet
+                {mcpReportError || "No sales data for this period yet"}
               </div>
             ) : (
               <div className="h-64 sm:h-72 w-full min-w-0 flex items-center justify-center relative">
@@ -691,9 +756,23 @@ export default function Dashboard() {
         </div>
 
         {/* ══════════ CEO OVERVIEW: Store Achievement + TL Achievement ══════════ */}
-        {!activeLoading && !ops && (
+        {!mcpReportLoading && !ops && (
           <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-8 text-center text-[var(--text-muted)] text-sm">
-            No daily operations submitted for {effectiveRange.from === effectiveRange.to ? effectiveRange.from : `${effectiveRange.from} to ${effectiveRange.to}`} yet — India Revenue, TL Achievement, RAG Status, and Target vs Achieved will show here once a Team Leader submits for this period.
+            {mcpReportError || `No sales data for ${effectiveRange.from === effectiveRange.to ? effectiveRange.from : `${effectiveRange.from} to ${effectiveRange.to}`} yet.`}
+          </div>
+        )}
+        {ops && ops.needsReview && ops.needsReview.length > 0 && (
+          <div className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm">
+            <span className="flex items-center gap-2">
+              <AlertTriangle size={16} />
+              {ops.needsReview.length} branch{ops.needsReview.length > 1 ? "es" : ""} synced from MCP need a team leader assignment (excluded from India Revenue/TL Achievement below).
+            </span>
+            <Link
+              to="/settings/branch-assignment"
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-xs font-semibold"
+            >
+              Review Branches
+            </Link>
           </div>
         )}
         {ops && (
@@ -1241,13 +1320,13 @@ export default function Dashboard() {
           <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 min-w-0">
             <h3 className="text-base font-bold text-white tracking-tight mb-1">Revenue Breakdown</h3>
             <p className="text-xs text-[var(--text-muted)] mb-4">Distribution by team leader</p>
-            {sheetsLoading ? (
+            {mcpReportLoading ? (
               <div className="h-64 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
             ) : !hasRevenueBreakdown ? (
               <div className="h-64 flex flex-col items-center justify-center text-center p-4">
                 <PieIcon size={32} className="text-[var(--text-muted)] mb-2 opacity-40" />
                 <p className="text-xs font-semibold text-[var(--text-secondary)]">No revenue logged yet</p>
-                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Submit daily operations logs to populate this breakdown</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Live sales revenue by team leader will appear here</p>
               </div>
             ) : (
               <div className="h-64 w-full min-w-0">

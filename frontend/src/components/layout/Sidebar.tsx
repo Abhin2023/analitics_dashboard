@@ -87,7 +87,7 @@ function NavItemLink({
         borderRadius: "12px",
         fontSize: indent ? "13px" : "14px",
         fontWeight: isActive ? 600 : 500,
-        color: isActive ? "#3b82f6" : "#a1a1aa",
+        color: isActive ? "#3b82f6" : "var(--text-secondary)",
         backgroundColor: isActive ? "rgba(59,130,246,0.12)" : "transparent",
         border: isActive ? "1px solid rgba(59,130,246,0.25)" : "1px solid transparent",
         textDecoration: "none",
@@ -98,15 +98,15 @@ function NavItemLink({
       })}
       onMouseEnter={(e) => {
         if (!e.currentTarget.style.backgroundColor?.includes("59,130,246")) {
-          e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.05)";
-          e.currentTarget.style.color = "#f4f4f5";
+          e.currentTarget.style.backgroundColor = "var(--bg-card-hover)";
+          e.currentTarget.style.color = "var(--text-primary)";
         }
       }}
       onMouseLeave={(e) => {
         const isActive = e.currentTarget.getAttribute("aria-current") === "page";
         if (!isActive) {
           e.currentTarget.style.backgroundColor = "transparent";
-          e.currentTarget.style.color = "#a1a1aa";
+          e.currentTarget.style.color = "var(--text-secondary)";
         }
       }}
     >
@@ -158,7 +158,7 @@ function CollapsibleSection({
           borderRadius: "12px",
           fontSize: "14px",
           fontWeight: isAnyActive ? 600 : 500,
-          color: isAnyActive ? accentColor : "#a1a1aa",
+          color: isAnyActive ? accentColor : "var(--text-secondary)",
           backgroundColor: isAnyActive ? `${accentColor}18` : "transparent",
           border: isAnyActive ? `1px solid ${accentColor}40` : "1px solid transparent",
           cursor: "pointer",
@@ -170,14 +170,14 @@ function CollapsibleSection({
         }}
         onMouseEnter={(e) => {
           if (!isAnyActive) {
-            e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.05)";
-            e.currentTarget.style.color = "#f4f4f5";
+            e.currentTarget.style.backgroundColor = "var(--bg-card-hover)";
+            e.currentTarget.style.color = "var(--text-primary)";
           }
         }}
         onMouseLeave={(e) => {
           if (!isAnyActive) {
             e.currentTarget.style.backgroundColor = "transparent";
-            e.currentTarget.style.color = "#a1a1aa";
+            e.currentTarget.style.color = "var(--text-secondary)";
           }
         }}
       >
@@ -287,8 +287,8 @@ export function Sidebar() {
           top: 0,
           height: "100vh",
           width: mobileOpen ? SIDEBAR_EXPANDED : sidebarWidth,
-          backgroundColor: "#11131e",
-          borderRight: "1px solid rgba(255,255,255,0.08)",
+          backgroundColor: "var(--bg-card)",
+          borderRight: "1px solid var(--border-subtle)",
           zIndex: 50,
           display: "flex",
           flexDirection: "column",
@@ -307,7 +307,7 @@ export function Sidebar() {
             justifyContent: collapsed && !mobileOpen ? "center" : "space-between",
             height: "64px",
             padding: "0 16px",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            borderBottom: "1px solid var(--border-subtle)",
             flexShrink: 0,
           }}
         >
@@ -335,7 +335,7 @@ export function Sidebar() {
                     display: "block",
                     fontSize: "15px",
                     fontWeight: 700,
-                    color: "#fff",
+                    color: "var(--text-primary)",
                     lineHeight: 1.2,
                     whiteSpace: "nowrap",
                   }}
@@ -349,7 +349,7 @@ export function Sidebar() {
                     fontWeight: 600,
                     textTransform: "uppercase",
                     letterSpacing: "0.08em",
-                    color: "#71717a",
+                    color: "var(--text-muted)",
                   }}
                 >
                   Enterprise
@@ -385,17 +385,17 @@ export function Sidebar() {
               borderRadius: "8px",
               border: "none",
               background: "transparent",
-              color: "#71717a",
+              color: "var(--text-muted)",
               cursor: "pointer",
               transition: "color 0.2s, background 0.2s",
               flexShrink: 0,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "#fff";
-              e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+              e.currentTarget.style.color = "var(--text-primary)";
+              e.currentTarget.style.background = "var(--border-subtle)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#71717a";
+              e.currentTarget.style.color = "var(--text-muted)";
               e.currentTarget.style.background = "transparent";
             }}
             title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
@@ -412,7 +412,7 @@ export function Sidebar() {
               borderRadius: "8px",
               border: "none",
               background: "transparent",
-              color: "#71717a",
+              color: "var(--text-muted)",
               cursor: "pointer",
             }}
           >
@@ -449,7 +449,7 @@ export function Sidebar() {
                 <div
                   style={{
                     height: "1px",
-                    background: "rgba(255,255,255,0.06)",
+                    background: "var(--border-subtle)",
                     margin: "8px 8px",
                   }}
                 />
@@ -475,7 +475,7 @@ export function Sidebar() {
                 <div
                   style={{
                     height: "1px",
-                    background: "rgba(255,255,255,0.06)",
+                    background: "var(--border-subtle)",
                     margin: "8px 8px",
                   }}
                 />
