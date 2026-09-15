@@ -36,7 +36,15 @@ def _bucket_key(d: date, granularity: str) -> str:
 async def _ensure_mcp_coverage(db: AsyncSession, start_date: date, end_date: date) -> None:
     """Lazily backfill mcp_daily_sales for the requested range if it isn't
     fully synced yet, so filtering by an arbitrary date range doesn't just
-    return an empty/partial result."""
+    return an empty/partial result.
+
+    Today is a special case: it's never "fully synced" in the sense the
+    other dates are — new sales keep landing in MCP as the day goes on, so
+    a row already existing for today doesn't mean today is complete. Always
+    re-pull just today's date (a single day, cheap) whenever it's in range,
+    instead of only backfilling when a date is entirely missing.
+    """
+    today = date.today()
     result = await db.execute(
         select(McpDailySale.date).where(
             McpDailySale.date >= start_date, McpDailySale.date <= end_date
@@ -44,8 +52,13 @@ async def _ensure_mcp_coverage(db: AsyncSession, start_date: date, end_date: dat
     )
     synced_dates = {row[0] for row in result.all()}
     expected_days = (end_date - start_date).days + 1
-    if len(synced_dates) < expected_days:
+    fully_covered = len(synced_dates) >= expected_days
+    includes_today = start_date <= today <= end_date
+
+    if not fully_covered:
         await sync_mcp_sales(db, start_date.isoformat(), end_date.isoformat())
+    elif includes_today:
+        await sync_mcp_sales(db, today.isoformat(), today.isoformat())
 
 
 async def get_sales_report(
@@ -161,13 +174,14 @@ async def get_sales_report(
         # can be shown correctly instead of defaulting to INR everywhere.
         g = group_map.setdefault(key, {
             "key": key, "country": store.country, "revenue": 0.0, "target": 0.0,
-            "walkins": 0, "conversions": 0, "store_count": 0,
+            "walkins": 0, "conversions": 0, "store_count": 0, "stores": [],
         })
         g["revenue"] += per_store[sid]["revenue"]
         g["target"] += per_store[sid]["target"]
         g["walkins"] += per_store[sid]["walkins"]
         g["conversions"] += per_store[sid]["conversions"]
         g["store_count"] += 1
+        g["stores"].append(store.name)
 
     breakdown = []
     for g in group_map.values():

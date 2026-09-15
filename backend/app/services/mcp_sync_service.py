@@ -28,10 +28,18 @@ async def _match_or_create_store(
     db: AsyncSession, mcp_shop_name: str, country_id: int, country_name: str
 ) -> tuple[Store, bool]:
     """Resolve an MCP shop name to a Store row. Returns (store, created)."""
-    result = await db.execute(select(Store).where(Store.mcp_shop_name == mcp_shop_name))
-    store = result.scalar_one_or_none()
-    if store:
-        return store, False
+    result = await db.execute(
+        select(Store).where(Store.mcp_shop_name == mcp_shop_name).order_by(Store.id)
+    )
+    matches = result.scalars().all()
+    if matches:
+        if len(matches) > 1:
+            logger.warning(
+                "Duplicate stores share mcp_shop_name=%r (ids=%s) — using the oldest, "
+                "ignoring the rest. Run scripts/dedupe_mcp_stores.py to clean this up.",
+                mcp_shop_name, [s.id for s in matches],
+            )
+        return matches[0], False
 
     if country_id == 1:
         # Try to match an existing India store (created by the Sheets sync)
