@@ -78,11 +78,20 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     invite_token = Column(String(200), nullable=True)
     invite_expires_at = Column(DateTime, nullable=True)
+    # Single assigned store (Telecaller/Salesperson — one store each). Not
+    # used for Team Leader (see Store.team_leader_id, one-to-many) or
+    # Regional Manager (see UserStoreAccess, an explicit multi-store grant).
+    store_id = Column(Integer, ForeignKey("stores.id"), nullable=True)
+    # Explicit "reports to" link for Telecaller/Salesperson, replacing the
+    # old implicit inference-by-shared-sheet-name for this specific question.
+    team_leader_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     role = relationship("Role", backref="users")
     store_access = relationship("UserStoreAccess", back_populates="user", cascade="all, delete-orphan")
+    store = relationship("Store", foreign_keys=[store_id])
+    manager = relationship("User", remote_side=[id], foreign_keys=[team_leader_id])
 
 
 # ── User ↔ Store access ───────────────────────────────────────────

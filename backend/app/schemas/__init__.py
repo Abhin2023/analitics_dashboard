@@ -30,7 +30,9 @@ class UserCreate(BaseModel):
     password: str
     role_id: int
     is_active: bool = True
-    store_ids: List[int] = []
+    store_ids: List[int] = []  # Regional Manager: explicit multi-store grant
+    store_id: Optional[int] = None  # Telecaller/Salesperson: single store
+    team_leader_id: Optional[int] = None  # Telecaller/Salesperson: reports to
 
 
 class UserUpdate(BaseModel):
@@ -40,6 +42,8 @@ class UserUpdate(BaseModel):
     role_id: Optional[int] = None
     is_active: Optional[bool] = None
     store_ids: Optional[List[int]] = None
+    store_id: Optional[int] = None
+    team_leader_id: Optional[int] = None
 
 
 class UserResponse(BaseModel):
@@ -50,6 +54,8 @@ class UserResponse(BaseModel):
     role_name: str = ""
     is_active: bool
     store_ids: List[int] = []
+    store_id: Optional[int] = None
+    team_leader_id: Optional[int] = None
     created_at: Optional[datetime] = None
 
     class Config:

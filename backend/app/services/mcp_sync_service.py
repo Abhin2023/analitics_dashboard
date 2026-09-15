@@ -1,19 +1,17 @@
 import logging
-import secrets
 from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 
-from ..core.security import hash_password
-from ..models.models import Store, User, Role, McpDailySale, Setting
+from ..models.models import Store, User, McpDailySale, Setting
+from .common import get_or_create_unassigned_tl
 from .mcp_branches import MCP_COUNTRIES
 from .mcp_daily_sales import get_daily_sales
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
 LAST_SYNC_SETTING_KEY = "last_mcp_sync_at"
 
 
@@ -24,37 +22,6 @@ def _extract_city_token(mcp_shop_name: str) -> str:
     if " - " in mcp_shop_name:
         return mcp_shop_name.rsplit(" - ", 1)[-1].strip().lower()
     return mcp_shop_name.strip().lower()
-
-
-async def _get_or_create_role(db: AsyncSession, name: str) -> Role:
-    result = await db.execute(select(Role).where(Role.name == name))
-    role = result.scalar_one_or_none()
-    if not role:
-        role = Role(name=name, description=f"{name} role")
-        db.add(role)
-        await db.flush()
-    return role
-
-
-async def _get_or_create_unassigned_tl(db: AsyncSession) -> User:
-    """Same placeholder ('Unassigned') pattern sheet_sync_service.py uses for
-    auto-created stores, so both sync paths share one placeholder user."""
-    role = await _get_or_create_role(db, "Team Leader")
-    result = await db.execute(select(User).where(User.name.ilike("Unassigned")))
-    user = result.scalar_one_or_none()
-    if user:
-        return user
-    email = "unassigned@system.local"
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    if not user:
-        user = User(
-            name="Unassigned", email=email, password_hash=DEFAULT_PASSWORD_HASH,
-            role_id=role.id, is_active=False,
-        )
-        db.add(user)
-        await db.flush()
-    return user
 
 
 async def _match_or_create_store(
@@ -82,7 +49,7 @@ async def _match_or_create_store(
         # 0 or >1 matches: ambiguous, fall through to create a new store
         # flagged for manual review rather than guessing.
 
-    placeholder_tl = await _get_or_create_unassigned_tl(db)
+    placeholder_tl = await get_or_create_unassigned_tl(db)
     store = Store(
         name=mcp_shop_name,
         team_leader_id=placeholder_tl.id,

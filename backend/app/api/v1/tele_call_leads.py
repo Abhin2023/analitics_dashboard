@@ -394,6 +394,9 @@ async def create_telecaller(
         password_hash=hash_password(body.password),
         role_id=tc_role.id,
         is_active=True,
+        # The calling Team Leader becomes this telecaller's explicit manager;
+        # an admin-tier caller leaves it unset (editable later via /users).
+        team_leader_id=user.id if role_name == "Team Leader" else None,
     )
     db.add(new_user)
     await db.flush()
