@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Globe, { GlobeMethods } from "react-globe.gl";
 import { Globe as GlobeIcon, ArrowLeft, MapPin } from "lucide-react";
+import { formatByCountry as fmtByCountry } from "@/lib/formatMoney";
 
 export interface GlobeBranch {
   shop: string;
@@ -42,26 +43,6 @@ function ragColor(p: number) {
   return p >= 65 ? "#10b981" : p >= 35 ? "#f59e0b" : "#ef4444";
 }
 
-// Each country's own currency — matches the symbols used on Sales Overview
-// and the main Dashboard's branch list, so a target/actual figure always
-// reads in the currency it was actually recorded in.
-function fmtByCountry(n: number, country: string) {
-  switch (country) {
-    case "India": {
-      if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
-      if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-      return `₹${(n / 1000).toFixed(0)}K`;
-    }
-    case "UAE": return `AED ${(n / 1000).toFixed(0)}K`;
-    case "Oman": return `OMR ${(n / 1000).toFixed(0)}K`;
-    case "Qatar": return `QAR ${(n / 1000).toFixed(0)}K`;
-    case "Pakistan": return `PKR ${(n / 100000).toFixed(1)}L`;
-    case "Malaysia": return `MYR ${(n / 1000).toFixed(0)}K`;
-    case "UK": return `£${(n / 1000).toFixed(0)}K`;
-    case "Bahrain": return `BHD ${(n / 1000).toFixed(0)}K`;
-    default: return `${(n / 1000).toFixed(0)}K`;
-  }
-}
 
 const COUNTRY_COLORS: Record<string, string> = {
   India: "#3b82f6",

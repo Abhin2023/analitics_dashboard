@@ -323,36 +323,55 @@ def parse_shop_stock_position(text: str) -> list[dict[str, Any]]:
 
 
 def parse_pending_items(text: str) -> list[dict[str, Any]]:
-    """Parse pending_items_by_shop MCP response."""
+    """Parse pending_items_by_shop MCP response. Real format per shop:
+
+        ### SHOP: <name> (Id <id>)
+        EMAIL: <email>
+        Pending count: N  (payment P, installation I)
+          Payment pending (P), total <CUR> <amt>:
+            #<txn id> | <date> | <name> | <CUR> <amt>
+          Installation pending (I):
+            #<txn id> | <date> | <name>
+
+    followed by an "ADMIN ROLL-UP" section with a per-shop total table —
+    ignored here since it's a duplicate rollup of the detail already
+    collected above, not additional data.
+    """
     shops = []
     current = None
+    section = None  # "payment" | "installation", which items list we're under
 
     lines = text.split("\r\n")
     for line in lines:
-        line = line.strip()
-        if not line:
+        stripped = line.strip()
+        if not stripped:
             continue
+        if stripped.startswith("ADMIN ROLL-UP"):
+            break
 
-        if line.startswith("■ "):
+        if stripped.startswith("### SHOP:"):
             if current:
                 shops.append(current)
+            name = stripped[len("### SHOP:"):].strip()
+            name = re.sub(r"\s*\(Id\s+\d+\)\s*$", "", name)
             current = {
-                "shop": line[2:].strip(),
-                "email": "",
-                "payment_pending": 0,
-                "installation_pending": 0,
-                "items": [],
+                "shop": name, "email": "", "payment_pending": 0,
+                "installation_pending": 0, "items": [],
             }
-        elif current and "Email:" in line:
-            match = re.search(r"Email:\s*(\S+)", line)
+            section = None
+        elif current and stripped.startswith("EMAIL:"):
+            current["email"] = stripped.split(":", 1)[1].strip()
+        elif current and stripped.startswith("Pending count:"):
+            match = re.search(r"payment\s+(\d+),\s*installation\s+(\d+)", stripped, re.IGNORECASE)
             if match:
-                current["email"] = match.group(1)
-        elif current and "Payment Pending:" in line:
-            current["payment_pending"] = _parse_int(line.split(":")[1])
-        elif current and "Installation Pending:" in line:
-            current["installation_pending"] = _parse_int(line.split(":")[1])
-        elif current and line.startswith("#"):
-            current["items"].append(line)
+                current["payment_pending"] = int(match.group(1))
+                current["installation_pending"] = int(match.group(2))
+        elif current and stripped.startswith("Payment pending"):
+            section = "payment"
+        elif current and stripped.startswith("Installation pending"):
+            section = "installation"
+        elif current and section and stripped.startswith("#"):
+            current["items"].append(stripped)
 
     if current:
         shops.append(current)

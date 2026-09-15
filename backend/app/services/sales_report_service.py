@@ -156,7 +156,13 @@ async def get_sales_report(
     group_map: dict[str, dict] = {}
     for sid in confirmed_ids:
         key = _group_key(sid)
-        g = group_map.setdefault(key, {"key": key, "revenue": 0.0, "target": 0.0, "walkins": 0, "conversions": 0, "store_count": 0})
+        store, _ = stores_by_id[sid]
+        # Each branch/region group is within one country, so its own currency
+        # can be shown correctly instead of defaulting to INR everywhere.
+        g = group_map.setdefault(key, {
+            "key": key, "country": store.country, "revenue": 0.0, "target": 0.0,
+            "walkins": 0, "conversions": 0, "store_count": 0,
+        })
         g["revenue"] += per_store[sid]["revenue"]
         g["target"] += per_store[sid]["target"]
         g["walkins"] += per_store[sid]["walkins"]
@@ -175,7 +181,7 @@ async def get_sales_report(
     branch_totals: dict[str, dict] = {}
     for sid in confirmed_ids:
         store, _ = stores_by_id[sid]
-        b = branch_totals.setdefault(store.name, {"name": store.name, "revenue": 0.0, "target": 0.0})
+        b = branch_totals.setdefault(store.name, {"name": store.name, "country": store.country, "revenue": 0.0, "target": 0.0})
         b["revenue"] += per_store[sid]["revenue"]
         b["target"] += per_store[sid]["target"]
     top_branch = None

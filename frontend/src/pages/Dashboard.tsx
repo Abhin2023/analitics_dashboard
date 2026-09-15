@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } fro
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/apiClient";
 import { localDateStr } from "@/lib/utils";
+import { formatByCountry as fmtByCountry } from "@/lib/formatMoney";
 import { StatCard } from "@/components/shared/StatCard";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -45,25 +46,6 @@ function fmtINR(n: number) {
   if (n >= 1000) return `\u20b9${(n / 1000).toFixed(1)}K`;
   return `\u20b9${n.toLocaleString("en-IN")}`;
 }
-// Each country's own currency, not a flat USD/$ — matches the symbols used
-// on the Sales Overview page for the same branch data.
-function fmtByCountry(n: number, country: string) {
-  switch (country) {
-    case "India": {
-      if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
-      if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-      return `₹${(n / 1000).toFixed(0)}K`;
-    }
-    case "UAE": return `AED ${(n / 1000).toFixed(0)}K`;
-    case "Oman": return `OMR ${(n / 1000).toFixed(0)}K`;
-    case "Qatar": return `QAR ${(n / 1000).toFixed(0)}K`;
-    case "Pakistan": return `PKR ${(n / 100000).toFixed(1)}L`;
-    case "Malaysia": return `MYR ${(n / 1000).toFixed(0)}K`;
-    case "UK": return `£${(n / 1000).toFixed(0)}K`;
-    case "Bahrain": return `BHD ${(n / 1000).toFixed(0)}K`;
-    default: return `${(n / 1000).toFixed(0)}K`;
-  }
-}
 // Same idea, keyed by ISO-ish currency code instead of country name — the
 // MCP country-comparison data reports each country's own local_currency
 // code directly (INR, AED, OMR, QAR...) rather than a country string.
@@ -99,6 +81,7 @@ export default function Dashboard() {
   const [countryLoading, setCountryLoading] = useState(false);
   const [stockData, setStockData] = useState<any[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState("");
   const [stockCountryId, setStockCountryId] = useState(4);
   const [stockExpanded, setStockExpanded] = useState<Set<string>>(new Set());
   const [branchesData, setBranchesData] = useState<any[]>([]);
@@ -107,7 +90,7 @@ export default function Dashboard() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [period, setPeriod] = useState<"7day" | "month" | "6month" | "1year" | "custom">("month");
+  const [period, setPeriod] = useState<"1day" | "7day" | "month" | "6month" | "1year" | "custom">("month");
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [showRangeFilter, setShowRangeFilter] = useState(false);
   const [draftRange, setDraftRange] = useState({ from: "", to: "" });
@@ -131,6 +114,7 @@ export default function Dashboard() {
     const now = new Date();
     const to = localDateStr(now);
     if (period === "custom" && customRange) return customRange;
+    if (period === "1day") return { from: to, to }; // today only
     const from = new Date(now);
     if (period === "7day") from.setDate(from.getDate() - 6);
     else if (period === "6month") from.setMonth(from.getMonth() - 6);
@@ -182,10 +166,19 @@ export default function Dashboard() {
 
   const fetchStock = useCallback(async () => {
     setStockLoading(true);
+    setStockError("");
     try {
       const res = await api.fetchRaw(`/mcp/stock/position?country_id=${stockCountryId}`);
-      if (res.ok) setStockData(await res.json());
-    } catch {}
+      if (res.ok) {
+        setStockData(await res.json());
+      } else if (res.status === 403) {
+        setStockError("You don't have access to view stock data.");
+      } else {
+        setStockError("Couldn't reach the stock system — try refreshing.");
+      }
+    } catch {
+      setStockError("Couldn't reach the stock system — try refreshing.");
+    }
     setStockLoading(false);
   }, [stockCountryId]);
 
@@ -489,6 +482,7 @@ export default function Dashboard() {
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center rounded-xl border border-[var(--border-subtle)] bg-white/5 p-0.5">
                   {([
+                    { key: "1day", label: "Today" },
                     { key: "7day", label: "7 Days" },
                     { key: "month", label: "Month" },
                     { key: "6month", label: "6 Month" },
@@ -623,6 +617,10 @@ export default function Dashboard() {
             </div>
             {sheetsLoading ? (
               <div className="h-72 sm:h-80 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
+            ) : !ops ? (
+              <div className="h-72 sm:h-80 flex items-center justify-center text-sm text-[var(--text-muted)] text-center px-6">
+                No daily operations submitted for this period yet
+              </div>
             ) : (
               <div className="h-72 sm:h-80 w-full min-w-0">
                 <ResponsiveContainer width="100%" height="100%">
@@ -672,6 +670,10 @@ export default function Dashboard() {
             </div>
             {sheetsLoading ? (
               <div className="h-64 sm:h-72 animate-pulse bg-[var(--border-subtle)]/30 rounded-xl" />
+            ) : !ops ? (
+              <div className="h-64 sm:h-72 flex items-center justify-center text-sm text-[var(--text-muted)] text-center px-6">
+                No daily operations submitted for this period yet
+              </div>
             ) : (
               <div className="h-64 sm:h-72 w-full min-w-0 flex items-center justify-center relative">
                 <ResponsiveContainer width="100%" height="100%">
@@ -689,6 +691,11 @@ export default function Dashboard() {
         </div>
 
         {/* ══════════ CEO OVERVIEW: Store Achievement + TL Achievement ══════════ */}
+        {!activeLoading && !ops && (
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-8 text-center text-[var(--text-muted)] text-sm">
+            No daily operations submitted for {effectiveRange.from === effectiveRange.to ? effectiveRange.from : `${effectiveRange.from} to ${effectiveRange.to}`} yet — India Revenue, TL Achievement, RAG Status, and Target vs Achieved will show here once a Team Leader submits for this period.
+          </div>
+        )}
         {ops && (
           <>
             {/* CEO KPI Row */}
@@ -932,6 +939,8 @@ export default function Dashboard() {
                 <div key={i} className="h-12 rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
               ))}
             </div>
+          ) : stockError ? (
+            <div className="text-center py-8 text-amber-400 text-sm">{stockError}</div>
           ) : stockData.length === 0 ? (
             <div className="text-center py-8 text-[var(--text-muted)] text-sm">No stock data available</div>
           ) : (

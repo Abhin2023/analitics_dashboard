@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/apiClient";
 import { localDateStr } from "@/lib/utils";
+import { formatByCountry } from "@/lib/formatMoney";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
 import { BarChart3, Calendar, CalendarDays, CalendarRange, AlertTriangle, Users, Store, MapPin, Layers, Trophy } from "lucide-react";
@@ -37,13 +38,6 @@ function resolveRange(preset: RangePreset): { start: string; end: string } | nul
     return { start: localDateStr(start), end: localDateStr(end) };
   }
   return null;
-}
-
-function fmtINR(n: number) {
-  if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
-  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
-  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
-  return `₹${n.toLocaleString("en-IN")}`;
 }
 
 const GRANULARITY_OPTIONS: { key: Granularity; label: string; icon: any }[] = [
@@ -114,6 +108,16 @@ export default function SalesReports() {
   const trend = data?.trend || [];
   const needsReview = data?.needs_review || [];
   const topBranch = data?.top_branch || null;
+  // When a specific country is filtered, every figure on this page belongs
+  // to it — show that currency. With no filter (blended across countries)
+  // fall back to the company's default reporting currency (INR) for the
+  // combined totals/trend, same convention as the main Dashboard's KPIs.
+  const displayCountry = country || "India";
+  // Each branch/region row is genuinely single-country, so its own currency
+  // is reliable — but a "none"/"team_leader" row can blend multiple
+  // countries together, so its `country` field isn't trustworthy there.
+  const rowCountry = (row: any) =>
+    (groupBy === "branch" || groupBy === "region") && row.country ? row.country : displayCountry;
 
   return (
     <ErrorBoundary>
@@ -249,7 +253,7 @@ export default function SalesReports() {
               <p className="text-lg font-extrabold text-white">{topBranch.name}</p>
             </div>
             <div className="text-right">
-              <p className="text-xl font-extrabold text-white">{fmtINR(topBranch.revenue)}</p>
+              <p className="text-xl font-extrabold text-white">{formatByCountry(topBranch.revenue, topBranch.country || displayCountry)}</p>
               <p className="text-xs text-[var(--text-muted)]">
                 {topBranch.target > 0 ? `${topBranch.achievement_pct}% of target` : "revenue"}
               </p>
@@ -260,8 +264,8 @@ export default function SalesReports() {
         {/* Summary KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
           {[
-            { label: "Total Revenue", value: data ? fmtINR(data.total_revenue) : "—", color: "#3b82f6" },
-            { label: "Total Target", value: data ? fmtINR(data.total_target) : "—", color: "#10b981" },
+            { label: "Total Revenue", value: data ? formatByCountry(data.total_revenue, displayCountry) : "—", color: "#3b82f6" },
+            { label: "Total Target", value: data ? formatByCountry(data.total_target, displayCountry) : "—", color: "#10b981" },
             { label: "Achievement", value: data ? `${data.achievement_pct}%` : "—", color: (data?.achievement_pct || 0) >= 50 ? "#10b981" : "#f59e0b" },
             { label: "Walk-ins", value: data ? data.total_walkins.toLocaleString() : "—", color: "#a855f7" },
             { label: "Conversions", value: data ? data.total_conversions.toLocaleString() : "—", color: "#ec4899" },
@@ -282,10 +286,10 @@ export default function SalesReports() {
               <LineChart data={trend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="period" tick={{ fontSize: 10, fill: "#a1a1aa" }} />
-                <YAxis tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => fmtINR(v)} width={70} />
+                <YAxis tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => formatByCountry(v, displayCountry)} width={70} />
                 <Tooltip
                   contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                  formatter={(v: any) => fmtINR(Number(v))}
+                  formatter={(v: any) => formatByCountry(Number(v), displayCountry)}
                 />
                 <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6" }} />
               </LineChart>
@@ -326,8 +330,8 @@ export default function SalesReports() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right text-[var(--text-secondary)]">{row.store_count}</td>
-                      <td className="py-3.5 px-4 text-right font-semibold text-white">{fmtINR(row.revenue)}</td>
-                      <td className="py-3.5 px-4 text-right text-[var(--text-secondary)]">{fmtINR(row.target)}</td>
+                      <td className="py-3.5 px-4 text-right font-semibold text-white">{formatByCountry(row.revenue, rowCountry(row))}</td>
+                      <td className="py-3.5 px-4 text-right text-[var(--text-secondary)]">{formatByCountry(row.target, rowCountry(row))}</td>
                       <td className="py-3.5 px-4 text-right">
                         <span className={`font-bold ${row.achievement_pct >= 65 ? "text-emerald-400" : row.achievement_pct >= 35 ? "text-amber-400" : "text-rose-400"}`}>
                           {row.achievement_pct}%
