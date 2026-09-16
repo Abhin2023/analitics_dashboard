@@ -3,7 +3,7 @@ from sqlalchemy import (
     Column, String, Integer, Float, Boolean, Text, DateTime, Date,
     ForeignKey, Numeric, JSON, UniqueConstraint, Index
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from ..db.base import Base
 
 
@@ -122,7 +122,7 @@ class Store(Base):
     region = Column(String(50), default="")
     country = Column(String(50), default="India")
     mcp_country_id = Column(Integer, nullable=True)
-    mcp_shop_name = Column(String(150), nullable=True)
+    mcp_shop_name = Column(String(150), nullable=True, unique=True)
     needs_review = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -130,6 +130,30 @@ class Store(Base):
     team_leader = relationship("User", foreign_keys=[team_leader_id])
     currency = relationship("Currency", backref="stores")
     users_with_access = relationship("UserStoreAccess", back_populates="store")
+
+
+# ── Store MCP Aliases ────────────────────────────────────────────────
+# Permanent memory of every MCP shop name ever confirmed to belong to a
+# given Store, independent of Store.mcp_shop_name (which only holds the
+# CURRENT/most-recent one). Without this, merging a duplicate branch away
+# deletes the only record that a given MCP name was ever resolved — so the
+# next time MCP sends a sale under that same name, the system has no memory
+# of the earlier decision and creates a fresh "needs review" branch all over
+# again, forever. Recording every confirmed name here means a shop only
+# ever needs to be identified once, no matter how many times its name
+# resurfaces afterward.
+class StoreMcpAlias(Base):
+    __tablename__ = "store_mcp_aliases"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_id = Column(Integer, ForeignKey("stores.id", ondelete="CASCADE"), nullable=False)
+    mcp_shop_name = Column(String(150), nullable=False, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # passive_deletes=True defers to the DB's ON DELETE CASCADE (above)
+    # instead of the ORM's own default behavior of nulling out store_id on
+    # related rows before deleting the parent Store — which would otherwise
+    # fail outright since store_id is NOT NULL.
+    store = relationship("Store", backref=backref("mcp_aliases", passive_deletes=True))
 
 
 # ── Daily Submissions ──────────────────────────────────────────────
@@ -523,6 +547,21 @@ class McpDailySale(Base):
         UniqueConstraint("store_id", "date"),
         Index("ix_mcp_daily_sales_store_date", "store_id", "date"),
     )
+
+
+# ── Country Sales Snapshot ───────────────────────────────────────────
+# Saved once per sync from MCP's own country-comparison tool (which does
+# its own USD conversion using current rates at that moment), so the
+# International Sales chart can read a stored value instead of calling MCP
+# on every dashboard load. Overwritten in place on each sync — this is a
+# "latest known" snapshot per country, not a history.
+class CountrySalesSnapshot(Base):
+    __tablename__ = "country_sales_snapshots"
+    country = Column(String(50), primary_key=True)
+    local_amount = Column(Numeric(16, 2), default=0)
+    local_currency = Column(String(10), default="")
+    usd_amount = Column(Numeric(16, 2), default=0)
+    synced_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ── Store Dashboard (from xlsx) ───────────────────────────────────

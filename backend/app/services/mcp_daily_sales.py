@@ -93,23 +93,35 @@ async def get_daily_sales(
     if cached is not None:
         return cached
 
-    start = datetime.strptime(from_date, "%Y-%m-%d")
     transactions = await _fetch_transactions(country_id, from_date, to_date)
 
-    # Get targets (once per country, for the month)
-    month_name = start.strftime("%B")
-    targets_raw = await smart_service.shop_target_achievement(
-        country_id=country_id,
-        year=start.year,
-        month=month_name,
-    )
-    targets = {s["shop"]: s["target"] for s in parse_shop_target_achievement(targets_raw)}
+    # Targets are a per-month figure that can change (or not exist yet) from
+    # one month to the next — fetching only the range's starting month and
+    # applying it to every transaction meant a wide, multi-month sync (e.g.
+    # a full-year rebuild) silently gave most transactions the wrong
+    # target, usually 0, whenever a shop's target sheet for that one
+    # reference month didn't happen to list it. Fetch each distinct month
+    # actually present in the data separately instead.
+    months_needed = {(t["date"][:4], t["date"][5:7]) for t in transactions}
+    targets_by_month: dict[tuple[str, str], dict[str, float]] = {}
+    for year_str, month_num in months_needed:
+        month_name = datetime(int(year_str), int(month_num), 1).strftime("%B")
+        cache_key_month = _cache_key("shop_targets", country_id, year_str, month_num)
+        month_targets = _get_cached(cache_key_month)
+        if month_targets is None:
+            targets_raw = await smart_service.shop_target_achievement(
+                country_id=country_id, year=int(year_str), month=month_name,
+            )
+            month_targets = {s["shop"]: s["target"] for s in parse_shop_target_achievement(targets_raw)}
+            _set_cached(cache_key_month, month_targets)
+        targets_by_month[(year_str, month_num)] = month_targets
 
     # Aggregate by date + shop
     agg: dict[tuple[str, str], dict] = {}
     for txn in transactions:
         key = (txn["date"], txn["shop"])
         if key not in agg:
+            month_key = (txn["date"][:4], txn["date"][5:7])
             agg[key] = {
                 "date": txn["date"],
                 "store": txn["shop"],
@@ -119,7 +131,7 @@ async def get_daily_sales(
                 "replacement_count": 0,
                 "return_count": 0,
                 "other_count": 0,
-                "target": targets.get(txn["shop"], 0.0),
+                "target": targets_by_month.get(month_key, {}).get(txn["shop"], 0.0),
                 "country_id": country_id,
             }
         row = agg[key]
@@ -138,6 +150,27 @@ async def get_daily_sales(
     result = sorted(agg.values(), key=lambda x: (x["date"], x["store"]))
     _set_cached(cache_key, result)
     return result
+
+
+async def get_current_month_targets(country_id: int) -> dict[str, float]:
+    """Every shop's CURRENT month target for a country, as {mcp_shop_name:
+    target}. Used to keep Store.monthly_target up to date independent of
+    whether a shop has any recent transactions — a store with zero sales
+    this month still has a real target on MCP's side, and a store that
+    hasn't synced in weeks shouldn't keep reporting a stale target from
+    whenever it last happened to have activity."""
+    today = datetime.now(timezone.utc)
+    cache_key = _cache_key("current_month_targets", country_id, today.year, today.month)
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    targets_raw = await smart_service.shop_target_achievement(
+        country_id=country_id, year=today.year, month=today.strftime("%B"),
+    )
+    targets = {s["shop"]: s["target"] for s in parse_shop_target_achievement(targets_raw)}
+    _set_cached(cache_key, targets)
+    return targets
 
 
 async def get_sales_summary(

@@ -6,23 +6,25 @@ from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.exc import IntegrityError
 
-from ..models.models import Store, User, McpDailySale, Setting
+from ..models.models import Store, User, McpDailySale, Setting, StoreMcpAlias, CountrySalesSnapshot
 from .common import get_or_create_unassigned_tl
 from .mcp_branches import MCP_COUNTRIES
-from .mcp_daily_sales import get_daily_sales
+from .mcp_daily_sales import get_daily_sales, get_country_comparison, get_current_month_targets
 
 logger = logging.getLogger(__name__)
 
 LAST_SYNC_SETTING_KEY = "last_mcp_sync_at"
 
-# Serializes the "does this MCP shop already have a Store row?" check-then-
-# create below across concurrent sync calls in this process (e.g. two Sales
-# Reports page loads that both trigger a lazy backfill at the same moment).
-# Without this, two overlapping calls can both see "no existing store" for
-# the same shop and both INSERT, producing exact-duplicate Store rows each
-# flagged needs_review — see scripts/dedupe_mcp_stores.py for the cleanup
-# tool written for exactly that failure mode.
+# Reduces (but, on its own, does NOT guarantee) races within THIS process
+# between concurrent sync calls that both try to match/create the same shop.
+# It does nothing across separate worker processes, which is why the actual
+# guarantee against duplicates now comes from the unique constraint on
+# stores.mcp_shop_name (migration 004) plus the atomic upsert below — a
+# database-level guard that holds no matter how many processes race it at
+# once. This lock just avoids unnecessary rollback churn in the common
+# single-process case.
 _store_match_lock = asyncio.Lock()
 
 
@@ -44,6 +46,28 @@ def _extract_city_token(mcp_shop_name: str) -> str:
     return mcp_shop_name.strip().lower()
 
 
+async def _fix_country_if_wrong(store: Store, country_id: int, country_name: str) -> None:
+    """Self-heals a store's country/mcp_country_id if a match was resolved
+    for it under a different country than it's currently tagged with. This
+    corrects pre-existing bad data (e.g. a UAE branch that was manually
+    created with the Store model's default country="India" and never fixed)
+    the moment MCP activity for it is next processed, instead of leaving
+    that branch's revenue permanently misfiled under the wrong country in
+    every country-scoped report."""
+    if store.country != country_name or store.mcp_country_id != country_id:
+        store.country = country_name
+        store.mcp_country_id = country_id
+
+
+async def _record_alias(db: AsyncSession, store_id: int, mcp_shop_name: str) -> None:
+    """Permanently remembers that this MCP name belongs to this store, so a
+    future merge/delete of the Store row that currently holds it can never
+    erase the fact that this name was already resolved once."""
+    stmt = mysql_insert(StoreMcpAlias).values(store_id=store_id, mcp_shop_name=mcp_shop_name)
+    stmt = stmt.on_duplicate_key_update(store_id=stmt.inserted.store_id)
+    await db.execute(stmt)
+
+
 async def _match_or_create_store(
     db: AsyncSession, mcp_shop_name: str, country_id: int, country_name: str
 ) -> tuple[Store, bool]:
@@ -51,6 +75,23 @@ async def _match_or_create_store(
     mcp_shop_name = _normalize_shop_name(mcp_shop_name)
 
     async with _store_match_lock:
+        # Check every name ever confirmed for a store — not just whatever is
+        # CURRENTLY in Store.mcp_shop_name — so a name that was already
+        # resolved once (even if the branch that first claimed it has since
+        # been merged into a different one) is recognized instantly instead
+        # of spinning up a fresh "needs review" duplicate every time it
+        # resurfaces.
+        alias = (await db.execute(
+            select(StoreMcpAlias).where(StoreMcpAlias.mcp_shop_name == mcp_shop_name)
+        )).scalar_one_or_none()
+        if alias:
+            aliased_store = (await db.execute(
+                select(Store).where(Store.id == alias.store_id)
+            )).scalar_one_or_none()
+            if aliased_store:
+                await _fix_country_if_wrong(aliased_store, country_id, country_name)
+                return aliased_store, False
+
         result = await db.execute(
             select(Store).where(Store.mcp_shop_name == mcp_shop_name).order_by(Store.id)
         )
@@ -62,6 +103,8 @@ async def _match_or_create_store(
                     "ignoring the rest. Run scripts/dedupe_mcp_stores.py to clean this up.",
                     mcp_shop_name, [s.id for s in matches],
                 )
+            await _record_alias(db, matches[0].id, mcp_shop_name)
+            await _fix_country_if_wrong(matches[0], country_id, country_name)
             return matches[0], False
 
         if country_id == 1:
@@ -74,14 +117,38 @@ async def _match_or_create_store(
             )).scalars().all()
             matches = [s for s in candidates if token and token in s.name.lower()]
             if len(matches) == 1:
-                matches[0].mcp_shop_name = mcp_shop_name
-                matches[0].mcp_country_id = country_id
-                return matches[0], False
+                try:
+                    # A SAVEPOINT (not a full rollback) so that if this
+                    # specific update conflicts, we only discard THIS
+                    # change — not the rest of the batch this call is
+                    # partway through processing.
+                    async with db.begin_nested():
+                        matches[0].mcp_shop_name = mcp_shop_name
+                        matches[0].mcp_country_id = country_id
+                        await db.flush()
+                        await _record_alias(db, matches[0].id, mcp_shop_name)
+                    return matches[0], False
+                except IntegrityError:
+                    # Another process claimed this exact mcp_shop_name in the
+                    # gap between our SELECT and this flush (the unique
+                    # constraint from migration 004 caught it) — use
+                    # whichever row actually won instead.
+                    winner = (await db.execute(
+                        select(Store).where(Store.mcp_shop_name == mcp_shop_name)
+                    )).scalar_one()
+                    return winner, False
             # 0 or >1 matches: ambiguous, fall through to create a new store
             # flagged for manual review rather than guessing.
 
+        # Atomic insert-or-get against the unique constraint on
+        # mcp_shop_name, instead of a plain INSERT after the SELECT above.
+        # If another process (a different worker, not just a different
+        # asyncio task in this one) inserted the same shop a moment ago,
+        # this converts into a no-op UPDATE and returns THAT row's id —
+        # guaranteeing exactly one Store row per mcp_shop_name no matter how
+        # many processes race to create it at the same instant.
         placeholder_tl = await get_or_create_unassigned_tl(db)
-        store = Store(
+        stmt = mysql_insert(Store).values(
             name=mcp_shop_name,
             team_leader_id=placeholder_tl.id,
             country=country_name,
@@ -90,9 +157,21 @@ async def _match_or_create_store(
             needs_review=True,
             is_active=True,
         )
-        db.add(store)
+        stmt = stmt.on_duplicate_key_update(updated_at=stmt.inserted.updated_at)
+        result = await db.execute(stmt)
         await db.flush()
-        return store, True
+        # MySQL reports affected-rows as 1 for a fresh insert and 2 when the
+        # ON DUPLICATE KEY UPDATE branch fired instead — that's how we tell
+        # whether we actually created it or just found the winner.
+        created = result.rowcount == 1
+        store = (await db.execute(select(Store).where(Store.id == result.lastrowid))).scalar_one()
+        if not created:
+            logger.info(
+                "Concurrent sync already created the store for mcp_shop_name=%r (id=%s) — reusing it.",
+                mcp_shop_name, store.id,
+            )
+        await _record_alias(db, store.id, mcp_shop_name)
+        return store, created
 
 
 async def _set_last_sync_time(db: AsyncSession) -> None:
@@ -130,6 +209,67 @@ async def sync_mcp_sales(
             errors.append(f"{country['name']}: {e}")
             continue
 
+        # Keep each already-known store's Store.monthly_target current from
+        # MCP's live target sheet, independent of whether that store has
+        # any recent transactions. Deriving "target" from transaction
+        # history alone has two failure modes: a store with zero activity
+        # this month keeps reporting a stale target from whenever it last
+        # happened to sync, and a store with activity but no target row
+        # for the exact date being read shows 0 even though MCP has a real
+        # target for it. Reading the current-month sheet directly and
+        # writing it onto the Store record sidesteps both.
+        #
+        # Every store with a known MCP alias is explicitly WRITTEN here —
+        # not just the ones this month's sheet happens to mention. A shop
+        # whose target was discontinued (or the store simply hasn't synced
+        # in a while, like a branch with no activity since July) needs to
+        # be reset to 0, not left holding whatever value it had the last
+        # time it happened to appear — an earlier version of this only
+        # updated stores present in the current fetch and silently left
+        # stale non-zero targets on everything else, which is exactly the
+        # kind of staleness this whole fix exists to prevent.
+        try:
+            raw_current_targets = await get_current_month_targets(country["id"])
+            # Keys come straight from MCP's raw shop names, but aliases are
+            # stored normalized (see _normalize_shop_name) — normalize here
+            # too, or a shop reported with different spacing than what was
+            # recorded as its alias would never match.
+            current_targets = {_normalize_shop_name(k): v for k, v in raw_current_targets.items()}
+            stores_with_alias = (await db.execute(
+                select(Store).join(StoreMcpAlias, StoreMcpAlias.store_id == Store.id)
+                .where(Store.country == country["name"])
+                .distinct()
+            )).scalars().all()
+            for store in stores_with_alias:
+                store_aliases = (await db.execute(
+                    select(StoreMcpAlias.mcp_shop_name).where(StoreMcpAlias.store_id == store.id)
+                )).scalars().all()
+                # A store can carry more than one known name (e.g. two
+                # different companies' shops were merged into it); take
+                # whichever of its names has the highest current target —
+                # in practice only one is ever genuinely non-zero, so this
+                # picks the real one without needing to guess which alias
+                # is "the" name. Defaults to 0 if none of its names appear
+                # in this month's sheet at all.
+                store.monthly_target = max(
+                    (current_targets.get(_normalize_shop_name(name), 0.0) for name in store_aliases),
+                    default=0.0,
+                )
+        except Exception as e:
+            logger.warning("Current-month target refresh failed for %s: %s", country["name"], e)
+
+        # Resolve every row to its target store FIRST, then group by
+        # (store_id, date) before writing anything. This matters once a
+        # store has more than one known MCP name (aliases recorded via
+        # merges) — MCP can report two of those names as separate rows on
+        # the same date, and if each were upserted individually with
+        # overwrite semantics, the second write would silently replace the
+        # first instead of adding to it, permanently losing that revenue.
+        # Summing in Python first, then writing one row per (store, date),
+        # keeps the "overwrite is safe to re-run" property that ordinary
+        # (non-aliased) stores rely on for idempotent re-syncs, while still
+        # combining aliased names correctly.
+        grouped: dict[tuple[int, str], dict] = {}
         for row in daily_rows:
             if not row.get("store"):
                 continue
@@ -141,18 +281,36 @@ async def sync_mcp_sales(
                 if store.needs_review:
                     review_needed += 1
 
-            sub_date = datetime.strptime(row["date"], "%Y-%m-%d").date()
+            key = (store.id, row["date"])
+            g = grouped.setdefault(key, {
+                "store_id": store.id, "date": row["date"],
+                "revenue": 0.0, "units_sold": 0, "new_sale_count": 0,
+                "replacement_count": 0, "return_count": 0, "target": 0.0,
+            })
+            g["revenue"] += row.get("revenue", 0)
+            g["units_sold"] += row.get("units_sold", 0)
+            g["new_sale_count"] += row.get("new_sale_count", 0)
+            g["replacement_count"] += row.get("replacement_count", 0)
+            g["return_count"] += row.get("return_count", 0)
+            # Target is a per-shop monthly figure, not something to sum
+            # across aliases of the same physical branch — take whichever
+            # is largest so a placeholder/zero target on one alias doesn't
+            # clobber a real one already seen for this store+date.
+            g["target"] = max(g["target"], row.get("target", 0))
+
+        for g in grouped.values():
+            sub_date = datetime.strptime(g["date"], "%Y-%m-%d").date()
             # Atomic upsert (not select-then-insert) so concurrent syncs for
             # an overlapping date range — e.g. two report requests triggering
             # a lazy backfill at the same time — can't race on the unique
             # (store_id, date) constraint.
             stmt = mysql_insert(McpDailySale).values(
-                store_id=store.id, date=sub_date,
-                revenue=row.get("revenue", 0), units_sold=row.get("units_sold", 0),
-                new_sale_count=row.get("new_sale_count", 0),
-                replacement_count=row.get("replacement_count", 0),
-                return_count=row.get("return_count", 0),
-                target=row.get("target", 0), currency="",
+                store_id=g["store_id"], date=sub_date,
+                revenue=g["revenue"], units_sold=g["units_sold"],
+                new_sale_count=g["new_sale_count"],
+                replacement_count=g["replacement_count"],
+                return_count=g["return_count"],
+                target=g["target"], currency="",
                 synced_at=datetime.utcnow(),
             )
             stmt = stmt.on_duplicate_key_update(
@@ -166,6 +324,29 @@ async def sync_mcp_sales(
             )
             await db.execute(stmt)
             rows_synced += 1
+
+    # Snapshot MCP's own country-comparison totals (it does its own USD
+    # conversion using current rates) so the International Sales chart can
+    # read a stored value instead of calling MCP on every dashboard load —
+    # same principle as everything else above, just for this one view.
+    try:
+        comparison = await get_country_comparison(from_date, to_date)
+        for c in comparison:
+            stmt = mysql_insert(CountrySalesSnapshot).values(
+                country=c["country"], local_amount=c["local_amount"],
+                local_currency=c["local_currency"], usd_amount=c["usd_amount"],
+                synced_at=datetime.utcnow(),
+            )
+            stmt = stmt.on_duplicate_key_update(
+                local_amount=stmt.inserted.local_amount,
+                local_currency=stmt.inserted.local_currency,
+                usd_amount=stmt.inserted.usd_amount,
+                synced_at=stmt.inserted.synced_at,
+            )
+            await db.execute(stmt)
+    except Exception as e:
+        logger.warning("Country comparison snapshot failed: %s", e)
+        errors.append(f"country-comparison: {e}")
 
     await _set_last_sync_time(db)
     await db.commit()

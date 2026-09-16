@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 from ...core.deps import get_db, require_permission
-from ...models.models import Store, User, UserStoreAccess, McpDailySale, Role
+from ...models.models import Store, User, UserStoreAccess, Role
+from ...services.store_merge_service import merge_store_into
 from ...schemas import StoreCreate, StoreUpdate, StoreResponse
 
 router = APIRouter(prefix="/stores", tags=["stores"])
@@ -139,8 +140,13 @@ async def merge_store(
     db: AsyncSession = Depends(get_db),
     _user: User = require_permission("team_leaders", "edit"),
 ):
-    """Merge a duplicate (usually needs_review) store into an existing one:
-    re-point its mcp_daily_sales rows to the target store, then delete it."""
+    """Merge a duplicate (usually needs_review) store into an existing one —
+    moves every record that references it (sales, reviews, leads, staff,
+    walk-ins, marketing metrics, user access/assignment, and its permanent
+    MCP name memory) onto the target, correcting the target's country if
+    the source's is more reliable, then deletes it. See
+    store_merge_service.merge_store_into for the shared implementation used
+    here and by every cleanup script."""
     if store_id == target_store_id:
         raise HTTPException(status_code=400, detail="Cannot merge a store into itself")
     result = await db.execute(select(Store).where(Store.id == store_id))
@@ -152,25 +158,7 @@ async def merge_store(
     if not target:
         raise HTTPException(status_code=404, detail="Target store not found")
 
-    # Drop any mcp_daily_sales rows the target already has for the same dates
-    # (unique constraint on store_id+date would otherwise block the re-point).
-    existing_dates_result = await db.execute(
-        select(McpDailySale.date).where(McpDailySale.store_id == target_store_id)
-    )
-    existing_dates = {row[0] for row in existing_dates_result.all()}
-    dup_result = await db.execute(
-        select(McpDailySale).where(
-            McpDailySale.store_id == store_id, McpDailySale.date.in_(existing_dates)
-        )
-    )
-    for dup in dup_result.scalars().all():
-        await db.delete(dup)
-    await db.flush()
-
-    await db.execute(
-        update(McpDailySale).where(McpDailySale.store_id == store_id).values(store_id=target_store_id)
-    )
-    await db.delete(store)
+    await merge_store_into(db, store, target)
     await db.commit()
     return {"message": f"Merged store {store_id} into {target_store_id}"}
 

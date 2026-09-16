@@ -48,6 +48,7 @@ function startOfLocalMonth() {
 }
 
 function ragColor(p: number) { return p >= 65 ? "#10b981" : p >= 35 ? "#f59e0b" : "#ef4444"; }
+function ragLabel(p: number) { return p >= 100 ? "Achieved" : p >= 65 ? "On Track" : p >= 35 ? "Below Target" : "Critical"; }
 function fmtINR(n: number) {
   if (n >= 100000) return `\u20b9${(n / 100000).toFixed(1)}L`;
   if (n >= 1000) return `\u20b9${(n / 1000).toFixed(1)}K`;
@@ -82,7 +83,7 @@ export default function Dashboard() {
   const [sheetsLoading, setSheetsLoading] = useState(true);
   const [sheetsError, setSheetsError] = useState("");
   const [trendFilter, setTrendFilter] = useState<CardFilterState>(DEFAULT_CARD_FILTER);
-  const [mcpLiveData, setMcpLiveData] = useState<any[]>([]);
+  const [todayLiveRevenue, setTodayLiveRevenue] = useState(0);
   const [mcpLiveLoading, setMcpLiveLoading] = useState(false);
   const [countryData, setCountryData] = useState<any[]>([]);
   const [countryLoading, setCountryLoading] = useState(false);
@@ -163,25 +164,29 @@ export default function Dashboard() {
   const fetchMcpLive = useCallback(async () => {
     setMcpLiveLoading(true);
     try {
-      const countryId = COUNTRY_IDS[selectedCountry] ?? 1;
-      const res = await api.fetchRaw(
-        `/mcp/sales/daily?country_id=${countryId}&from_date=${effectiveRange.from}&to_date=${effectiveRange.to}`
-      );
-      if (res.ok) setMcpLiveData(await res.json());
+      // Reads today's revenue from our own database (kept fresh by the
+      // regular background sync) instead of calling MCP directly — see
+      // sales_report_service.get_live_today_revenue.
+      const res = await api.fetchRaw(`/sales-reports/live-today?country=${encodeURIComponent(selectedCountry)}`);
+      if (res.ok) {
+        const d = await res.json();
+        setTodayLiveRevenue(d.revenue || 0);
+      }
     } catch {}
     setMcpLiveLoading(false);
-  }, [effectiveRange, selectedCountry]);
+  }, [selectedCountry]);
 
   const fetchCountryComparison = useCallback(async () => {
     setCountryLoading(true);
     try {
-      const res = await api.fetchRaw(
-        `/mcp/sales/country-comparison?from_date=${effectiveRange.from}&to_date=${effectiveRange.to}`
-      );
+      // Reads the snapshot saved during the last sync (MCP does its own
+      // USD conversion at that moment) instead of calling MCP directly —
+      // see sales_report_service.get_country_comparison_snapshot.
+      const res = await api.fetchRaw(`/sales-reports/country-comparison`);
       if (res.ok) setCountryData(await res.json());
     } catch {}
     setCountryLoading(false);
-  }, [effectiveRange]);
+  }, []);
 
   const fetchMcpReports = useCallback(async () => {
     setMcpReportLoading(true);
@@ -287,7 +292,16 @@ export default function Dashboard() {
   const ops = useMemo(() => {
     if (!mcpTlReport || !mcpBranchReport) return null;
 
+    // Branches with no monthly target set can't have a meaningful
+    // achievement % (the backend reports 0% for them, same as a branch
+    // that's genuinely failing) — that includes leftover placeholder rows
+    // ("Store Name", the "<City> Store" template batch, "Online", etc.) as
+    // well as any real branch that hasn't had a target configured yet.
+    // Excluding them here keeps this ranking limited to branches it's
+    // actually meaningful to rank; their revenue still counts everywhere
+    // else on the dashboard, this only affects this one chart's list.
     const storeAchievements = (mcpBranchReport.breakdown || [])
+      .filter((r: any) => r.target > 0)
       .map((r: any) => ({
         store: r.key, mtd: r.revenue, target: r.target, achPct: r.achievement_pct,
         walkins: r.walkins, sales: r.conversions,
@@ -325,13 +339,6 @@ export default function Dashboard() {
     };
   }, [mcpTlReport, mcpBranchReport]);
 
-  // Today's live revenue from MCP
-  const todayStr = localDateStr(new Date());
-  const todayLiveRevenue = useMemo(() => {
-    return mcpLiveData
-      .filter((r: any) => r.date === todayStr)
-      .reduce((s: number, r: any) => s + (r.revenue || 0), 0);
-  }, [mcpLiveData, todayStr]);
 
   // Derive KPI data from sheets
   const kpiData = useMemo(() => {
@@ -820,16 +827,30 @@ export default function Dashboard() {
             {/* Store Achievement + TL Achievement Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 min-w-0">
               <div className="lg:col-span-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 sm:p-6 min-w-0">
-                <h3 className="text-sm font-bold text-white tracking-tight mb-1">{selectedCountry} Store MTD Achievement %</h3>
-                <p className="text-xs text-[var(--text-muted)] mb-4">All {ops.storeAchievements.length} {selectedCountry} stores ranked by performance</p>
-                <div className="h-[420px] w-full min-w-0">
+                <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+                  <div>
+                    <h3 className="text-sm font-bold text-white tracking-tight mb-1">{selectedCountry} Store MTD Achievement %</h3>
+                    <p className="text-xs text-[var(--text-muted)]">All {ops.storeAchievements.length} {selectedCountry} stores ranked by performance</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-secondary)] shrink-0">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "#10b981" }} />On Track (65%+)</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "#f59e0b" }} />Below Target (35-64%)</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: "#ef4444" }} />Critical (&lt;35%)</span>
+                  </div>
+                </div>
+                <div className="h-[420px] w-full min-w-0 mt-3">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={ops.storeAchievements} layout="vertical" margin={{ left: 5, right: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis type="number" domain={[0, 120]} tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => `${v}%`} />
                       <YAxis type="category" dataKey="store" tick={{ fontSize: 9, fill: "#a1a1aa" }} width={120} tickFormatter={shortStore} />
-                      <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
-                      <Bar dataKey="achPct" radius={[0, 4, 4, 0]}>
+                      <Tooltip
+                        formatter={(v: any) => [`${v}% — ${ragLabel(Number(v))}`, "Achievement"]}
+                        contentStyle={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" }}
+                        labelStyle={{ color: "var(--text-primary)" }}
+                        itemStyle={{ color: "var(--text-primary)" }}
+                      />
+                      <Bar dataKey="achPct" radius={[0, 4, 4, 0]} label={{ position: "right", fontSize: 9, fill: "var(--text-secondary)", formatter: (v: any) => ragLabel(Number(v)) }}>
                         {ops.storeAchievements.map((s: any, i: number) => <Cell key={i} fill={ragColor(s.achPct)} />)}
                       </Bar>
                     </BarChart>
@@ -846,7 +867,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#a1a1aa" }} />
                       <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#a1a1aa" }} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip formatter={(v: any) => [`${v}%`, "Achievement"]} contentStyle={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
+                      <Tooltip formatter={(v: any) => [`${v}% — ${ragLabel(Number(v))}`, "Achievement"]} contentStyle={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
                       <Bar dataKey="achPct" radius={[6, 6, 0, 0]}>
                         {ops.tlList.map((t: any, i: number) => <Cell key={i} fill={ragColor(t.achPct)} />)}
                       </Bar>
@@ -941,11 +962,11 @@ export default function Dashboard() {
               <Globe className="text-emerald-400" size={20} />
               <h3 className="text-base font-bold text-white tracking-tight">International Sales</h3>
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                LIVE from MCP
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Synced from MCP
               </span>
             </div>
-            <p className="text-xs text-[var(--text-muted)] mb-4">Bars normalized to USD for comparison — figures below show each country's own currency (current month)</p>
+            <p className="text-xs text-[var(--text-muted)] mb-4">Bars normalized to USD for comparison — figures below show each country's own currency, as of the last sync</p>
             {countryLoading ? (
               <div className="h-[300px] rounded-xl bg-[var(--border-subtle)]/20 animate-pulse" />
             ) : (

@@ -2,10 +2,45 @@ from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
-from ..models.models import Store, User, McpDailySale, DailySubmission
+from ..models.models import Store, User, McpDailySale, DailySubmission, CountrySalesSnapshot, StoreMcpAlias
 from .mcp_sync_service import sync_mcp_sales
+
+
+async def get_live_today_revenue(db: AsyncSession, country: str) -> dict:
+    """Today's revenue for a country, read from the stored mcp_daily_sales
+    table (kept fresh by the same background sync every report page
+    already triggers) instead of calling MCP directly. Deliberately sums
+    EVERY store tagged with this country regardless of needs_review status
+    — this is meant to be a raw, unfiltered pulse independent of branch
+    confirmation state, same as it was when it called MCP live."""
+    today = date.today()
+    total = (await db.execute(
+        select(func.coalesce(func.sum(McpDailySale.revenue), 0))
+        .select_from(McpDailySale)
+        .join(Store, Store.id == McpDailySale.store_id)
+        .where(Store.country == country, McpDailySale.date == today)
+    )).scalar()
+    return {"country": country, "date": today.isoformat(), "revenue": float(total or 0)}
+
+
+async def get_country_comparison_snapshot(db: AsyncSession) -> list[dict]:
+    """Reads the country-comparison totals saved during the last sync
+    (see mcp_sync_service.sync_mcp_sales) instead of calling MCP directly —
+    MCP already does its own USD conversion at sync time, so this just
+    returns what was last recorded."""
+    rows = (await db.execute(select(CountrySalesSnapshot))).scalars().all()
+    return [
+        {
+            "country": r.country,
+            "local_amount": float(r.local_amount or 0),
+            "local_currency": r.local_currency or "",
+            "usd_amount": float(r.usd_amount or 0),
+            "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+        }
+        for r in rows
+    ]
 
 
 def _default_range(granularity: str) -> tuple[date, date]:
@@ -115,6 +150,20 @@ async def get_sales_report(
         )
     )).scalars().all()
 
+    # Target comes from Store.monthly_target — kept current every sync from
+    # MCP's live current-month target sheet (see
+    # mcp_sync_service.sync_mcp_sales) independent of transaction activity —
+    # but ONLY for stores MCP actually maintains a target for. A store with
+    # no recorded MCP alias at all has never been confirmed as an active
+    # branch by that sync; its monthly_target field is often just a stale,
+    # manually-entered number from initial setup (frequently on old
+    # duplicate branches that a real branch has since replaced), and
+    # including it here silently double-counts against the real branch's
+    # already-correct MCP-driven target.
+    aliased_store_ids = {row[0] for row in (await db.execute(
+        select(StoreMcpAlias.store_id).where(StoreMcpAlias.store_id.in_(store_ids)).distinct()
+    )).all()}
+
     funnel_rows = []
     if india_store_ids:
         funnel_rows = (await db.execute(
@@ -125,19 +174,32 @@ async def get_sales_report(
             )
         )).scalars().all()
 
-    # Per-store aggregates: revenue sums across days, target is a monthly
-    # snapshot repeated per day so it's taken once (latest date), not summed.
+    # Store.monthly_target is a single month's figure. For a range that
+    # genuinely spans multiple months (6 Month, 1 Year, or a wide custom
+    # range), comparing many months of revenue against only one month's
+    # target understates target and makes Achievement % look inflated.
+    # Scale by how many months the selected range actually represents —
+    # e.g. ~30 days -> 1x (the "Month" preset, unchanged from before),
+    # ~183 days -> 6x, ~365 days -> 12x — rather than trying to look up
+    # each individual past month's own target (which would be incomplete
+    # for any month a branch didn't happen to sync in, or didn't exist
+    # yet), this keeps the scaling predictable and matches how these
+    # period presets are meant to be read: "6 months' worth of target."
+    days_in_range = (end_date - start_date).days + 1
+    month_multiplier = max(1, round(days_in_range / 30.44))
+
+    # Per-store aggregates: revenue sums across days in the selected range;
+    # target comes straight from the Store record (scaled per above), but
+    # only when MCP actively maintains it (see note above).
     per_store: dict[int, dict] = {}
     for sid in store_ids:
-        per_store[sid] = {"revenue": 0.0, "target": 0.0, "target_date": None, "walkins": 0, "conversions": 0}
+        store_target = float(stores_by_id[sid][0].monthly_target or 0) if sid in aliased_store_ids else 0.0
+        per_store[sid] = {"revenue": 0.0, "target": store_target * month_multiplier, "walkins": 0, "conversions": 0}
 
     trend_map: dict[str, dict] = {}
     for row in sales_rows:
         agg = per_store[row.store_id]
         agg["revenue"] += float(row.revenue or 0)
-        if agg["target_date"] is None or row.date > agg["target_date"]:
-            agg["target"] = float(row.target or 0)
-            agg["target_date"] = row.date
 
         key = _bucket_key(row.date, granularity)
         bucket = trend_map.setdefault(key, {"period": key, "revenue": 0.0})

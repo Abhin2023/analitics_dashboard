@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from ...core.deps import get_db, require_admin_tier
 from ...models.models import User
-from ...services.sales_report_service import get_sales_report
+from ...services.sales_report_service import (
+    get_sales_report, get_live_today_revenue, get_country_comparison_snapshot,
+)
 
 router = APIRouter(prefix="/sales-reports", tags=["sales-reports"])
 
@@ -29,3 +31,25 @@ async def sales_report(
         team_leader_id=team_leader_id, store_id=store_id,
         country=country, region=region, group_by=group_by,
     )
+
+
+@router.get("/live-today")
+async def live_today(
+    country: str = "India",
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_admin_tier(),
+):
+    """Today's revenue for a country, from the stored mcp_daily_sales table
+    (kept fresh by the regular background sync) rather than calling MCP
+    directly on every dashboard load."""
+    return await get_live_today_revenue(db, country)
+
+
+@router.get("/country-comparison")
+async def country_comparison(
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_admin_tier(),
+):
+    """Per-country sales normalized to USD, as captured during the last
+    sync (see sync_mcp_sales) rather than calling MCP directly."""
+    return await get_country_comparison_snapshot(db)

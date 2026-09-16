@@ -7,7 +7,7 @@ from sqlalchemy import select, and_
 from ..models.models import (
     SheetSource, SheetSyncLog, DailySubmission, Store, User, Role,
     StoreStaff, InternationalStore, GoogleReview, StrategicInsight,
-    DailyStoreTracker, StoreDashboardSnapshot,
+    DailyStoreTracker, StoreDashboardSnapshot, StoreMcpAlias,
 )
 import secrets
 from ..core.security import hash_password
@@ -380,6 +380,23 @@ class SheetSyncService:
     async def _get_or_create_store(self, db: AsyncSession, name: str, tl_user_id: int) -> Store:
         result = await db.execute(select(Store).where(Store.name == name))
         store = result.scalar_one_or_none()
+        if not store:
+            # This exact name may belong to a branch that was already
+            # merged/renamed away (its Store row deleted) — without this
+            # check, that merge gets silently undone the next time this
+            # sheet is synced, since a fresh row would otherwise be created
+            # here under the same retired name every time. See
+            # store_merge_service.merge_store_into, which records every
+            # merged branch's name here permanently before deleting it.
+            alias = (await db.execute(
+                select(StoreMcpAlias).where(StoreMcpAlias.mcp_shop_name == name)
+            )).scalar_one_or_none()
+            if alias:
+                aliased_store = (await db.execute(
+                    select(Store).where(Store.id == alias.store_id)
+                )).scalar_one_or_none()
+                if aliased_store:
+                    return aliased_store
         if not store:
             store = Store(
                 name=name,
