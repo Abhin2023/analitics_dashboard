@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select, func
 from app.db.session import AsyncSessionLocal
-from app.models.models import Store, McpDailySale
+from app.models.models import Store, McpDailySale, StoreMcpAlias
 from app.services.mcp_daily_sales import get_daily_sales
 from app.services.mcp_branches import MCP_COUNTRIES
 from app.services.mcp_sync_service import _normalize_shop_name
@@ -51,12 +51,26 @@ async def part1_data_accuracy():
                 key = _normalize_shop_name(r["store"])
                 fresh_by_shop[key] = fresh_by_shop.get(key, 0.0) + r["revenue"]
 
-            stores = (await db.execute(
-                select(Store).where(Store.mcp_country_id == country["id"], Store.mcp_shop_name.isnot(None))
+            # Compare by EVERY known alias for a store, not just its single
+            # mcp_shop_name field — a store that received revenue purely
+            # through merges (e.g. "Kannur" absorbing "Asair - Kannur" and
+            # "Genesis Growth Partners - Kannur") never gets its own
+            # mcp_shop_name field set, since merging only records aliases.
+            # Comparing against that single field alone falsely reports
+            # such a store as having "0 in MCP" even though its aliases
+            # fully account for its stored revenue.
+            # Store.country (text) is used for grouping rather than
+            # mcp_country_id — that column is only set by the India
+            # city-token match path, so most merged-in stores leave it
+            # NULL even though their country text field is correct.
+            stores_with_alias = (await db.execute(
+                select(Store).join(StoreMcpAlias, StoreMcpAlias.store_id == Store.id)
+                .where(Store.country == country["name"])
+                .distinct()
             )).scalars().all()
 
             country_mismatch = False
-            for s in stores:
+            for s in stores_with_alias:
                 stored = (await db.execute(
                     select(func.sum(McpDailySale.revenue)).where(
                         McpDailySale.store_id == s.id,
@@ -65,13 +79,18 @@ async def part1_data_accuracy():
                     )
                 )).scalar() or 0.0
                 stored = float(stored)
-                fresh = fresh_by_shop.get(_normalize_shop_name(s.mcp_shop_name), 0.0)
+
+                aliases = (await db.execute(
+                    select(StoreMcpAlias.mcp_shop_name).where(StoreMcpAlias.store_id == s.id)
+                )).scalars().all()
+                fresh = sum(fresh_by_shop.get(_normalize_shop_name(a), 0.0) for a in aliases)
+
                 if abs(stored - fresh) > 0.01:
                     country_mismatch = any_mismatch = True
                     print(f"  MISMATCH  {country['name']:10} {s.name!r:45} stored={stored:>14,.2f}  fresh_from_mcp={fresh:>14,.2f}")
 
             if not country_mismatch:
-                print(f"  OK  {country['name']:10} ({len(stores)} branches checked, all match)")
+                print(f"  OK  {country['name']:10} ({len(stores_with_alias)} branches checked, all match)")
 
     print()
     if any_mismatch:

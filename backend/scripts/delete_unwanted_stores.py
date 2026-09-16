@@ -18,7 +18,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.models import Store, McpDailySale, StoreMcpAlias
 
 # Names confirmed as unwanted — edit this list for future one-off cleanups.
-UNWANTED_NAMES = ["Shop", "Test shop Qatar"]
+UNWANTED_NAMES = ["KANLEE INNOVATIONS HO", "Test shop BP", "Test shop Dubai"]
 
 
 async def main():
