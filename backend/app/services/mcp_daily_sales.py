@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -29,6 +30,50 @@ def _set_cached(key: str, data: Any):
     _cache[key] = (datetime.now(timezone.utc).timestamp(), data)
 
 
+_TXN_LIMIT = 500
+
+
+async def _fetch_transactions(
+    country_id: int, from_date: str, to_date: str, limit: int = _TXN_LIMIT
+) -> list[dict]:
+    """Fetch every transaction in [from_date, to_date] for a country, without
+    silently truncating at the API's hard 500-row-per-call cap (confirmed via
+    testing: raising `limit` past 500 has no effect — it's a server-side
+    limit, not our own default). A single call is used whenever the range
+    comes back under the cap; if a call returns exactly `limit` rows, that
+    means more transactions exist for that window than were returned, so the
+    range is split in half and each half is fetched (and split again if
+    needed) until every piece is confirmed complete."""
+    raw = await smart_service.transaction_detail(
+        from_date=from_date, to_date=to_date, country_id=country_id, limit=limit,
+    )
+    txns = parse_transaction_detail(raw)
+    if len(txns) < limit:
+        return txns
+
+    start = datetime.strptime(from_date, "%Y-%m-%d")
+    end = datetime.strptime(to_date, "%Y-%m-%d")
+    if start >= end:
+        # Can't narrow the date window any further — this single day alone
+        # has more transactions than the API will ever return in one call.
+        logger.warning(
+            "Transaction cap hit on a single day %s (country_id=%s) — some "
+            "transactions for this day cannot be fetched with the current "
+            "API (no further chunking, no shop-level filtering used).",
+            from_date, country_id,
+        )
+        return txns
+
+    mid = start + (end - start) // 2
+    left_to = mid.strftime("%Y-%m-%d")
+    right_from = (mid + timedelta(days=1)).strftime("%Y-%m-%d")
+    left, right = await asyncio.gather(
+        _fetch_transactions(country_id, from_date, left_to, limit),
+        _fetch_transactions(country_id, right_from, to_date, limit),
+    )
+    return left + right
+
+
 async def get_daily_sales(
     country_id: int,
     from_date: str,
@@ -49,40 +94,7 @@ async def get_daily_sales(
         return cached
 
     start = datetime.strptime(from_date, "%Y-%m-%d")
-    end = datetime.strptime(to_date, "%Y-%m-%d")
-    days_diff = (end - start).days + 1
-
-    # Determine strategy: single call for short ranges, daily split for long
-    if days_diff <= 7:
-        raw = await smart_service.transaction_detail(
-            from_date=from_date,
-            to_date=to_date,
-            country_id=country_id,
-            limit=500,
-        )
-        transactions = parse_transaction_detail(raw)
-    else:
-        # Fetch in weekly chunks to avoid 500-row cap
-        transactions = []
-        chunk_start = start
-        while chunk_start <= end:
-            chunk_end = min(chunk_start + timedelta(days=6), end)
-            raw = await smart_service.transaction_detail(
-                from_date=chunk_start.strftime("%Y-%m-%d"),
-                to_date=chunk_end.strftime("%Y-%m-%d"),
-                country_id=country_id,
-                limit=500,
-            )
-            chunk_txns = parse_transaction_detail(raw)
-            transactions.extend(chunk_txns)
-
-            if len(chunk_txns) >= 500:
-                logger.warning(
-                    "Transaction chunk hit 500-row cap for %s to %s, may have missed data",
-                    chunk_start,
-                    chunk_end,
-                )
-            chunk_start = chunk_end + timedelta(days=1)
+    transactions = await _fetch_transactions(country_id, from_date, to_date)
 
     # Get targets (once per country, for the month)
     month_name = start.strftime("%B")
