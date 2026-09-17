@@ -503,6 +503,28 @@ class InsightResolutionLog(Base):
     )
 
 
+# ── Dashboard Chat (usage/cost log) ──────────────────────────────
+class DashboardChatLog(Base):
+    """One row per chatbot exchange on the AI Summary chat bubble, tracked
+    separately from AISummaryRun and ai_usage_log so this feature's real
+    token cost is directly visible rather than guessed at."""
+    __tablename__ = "dashboard_chat_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    provider = Column(String(20), nullable=False)
+    model = Column(String(100), nullable=False)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cost_estimate = Column(Numeric(10, 6), default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_chat_log_created_at", "created_at"),
+    )
+
+
 # ── Daily Store Tracker (from xlsx) ───────────────────────────────
 class DailyStoreTracker(Base):
     __tablename__ = "daily_store_tracker"

@@ -3,6 +3,7 @@ import { api } from "@/lib/apiClient";
 import { StatCard } from "@/components/shared/StatCard";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TableSkeleton } from "@/components/shared/Skeleton";
+import { PhoneActions } from "@/components/shared/PhoneActions";
 import {
   Phone, PhoneCall, PhoneOff, CalendarCheck, DollarSign,
   Clock, AlertCircle, CheckCircle2, TrendingUp, Brain,
@@ -224,9 +225,7 @@ export default function TelecallerDashboard() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold text-white truncate">{l.full_name}</p>
-                      {l.phone && (
-                        <a href={`tel:${l.phone}`} className="text-xs text-[var(--accent-blue)]">{l.phone}</a>
-                      )}
+                      <PhoneActions phone={l.phone} />
                     </div>
                     <span
                       className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold"
@@ -264,7 +263,7 @@ export default function TelecallerDashboard() {
                   {recent_leads.map((l: any) => (
                     <tr key={l.id} className="hover:bg-[var(--bg-card-hover)]">
                       <td className="py-2.5 font-medium text-white">{l.full_name}</td>
-                      <td className="py-2.5 text-[var(--text-secondary)]">{l.phone}</td>
+                      <td className="py-2.5 text-[var(--text-secondary)]"><PhoneActions phone={l.phone} /></td>
                       <td className="py-2.5 text-[var(--text-secondary)]">{l.lead_source}</td>
                       <td className="py-2.5 text-[var(--text-secondary)]">{l.sheet_tl_name}</td>
                       <td className="py-2.5">

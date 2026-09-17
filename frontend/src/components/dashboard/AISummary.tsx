@@ -11,6 +11,7 @@ import {
 import { api } from "@/lib/apiClient";
 import { useAuthStore } from "@/lib/authStore";
 import { getSocket } from "@/lib/socket";
+import { DashboardChatBubble } from "./DashboardChatBubble";
 import { formatMoney, formatNumber, formatPct } from "@/lib/formatMoney";
 import { curateKpis, buildSectionCharts, type KpiCard, type ChartDef } from "./sectionVisuals";
 import {
@@ -777,6 +778,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
           </div>
         </div>
       )}
+      <DashboardChatBubble />
     </div>
   );
 }

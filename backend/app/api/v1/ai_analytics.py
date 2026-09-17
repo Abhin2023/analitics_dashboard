@@ -9,6 +9,7 @@ from ...core.deps import get_db, get_current_user, get_user_permissions, require
 from ...models.models import User, Role, AISummaryConfig
 from ...services.ai_summary_service import get_summary, generate_summary, get_or_create_config, DEFAULT_SYSTEM_PROMPT, DEFAULT_MODEL
 from ...services.ai_section_contexts import SECTION_VIEW_RESOURCE, SECTION_DEFAULT_PROMPTS
+from ...services.dashboard_chat_service import ask_dashboard_chat, get_chat_usage_summary
 
 router = APIRouter(prefix="/ai-analytics", tags=["ai-analytics"])
 
@@ -66,6 +67,38 @@ async def ai_summary_regenerate(
     user: User = Depends(require_ai_manage),
 ):
     return await generate_summary(db, _month(month), section=section, force=True, user_id=user.id)
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[ChatMessage] = Field(default_factory=list)
+
+
+@router.post("/chat")
+async def dashboard_chat(
+    body: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await _check_view("overview", user, db)
+    return await ask_dashboard_chat(
+        db, user.id, body.message,
+        [{"role": m.role, "content": m.content} for m in body.history],
+    )
+
+
+@router.get("/chat/usage")
+async def dashboard_chat_usage(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_ai_manage),
+):
+    return await get_chat_usage_summary(db, days)
 
 
 class AISummaryConfigUpdate(BaseModel):

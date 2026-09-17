@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { ArrowLeft, Phone, Store, Globe, Tag, Clock, UserCheck } from "lucide-react";
+import { PhoneActions } from "@/components/shared/PhoneActions";
 
 const STATUS_COLORS: Record<string, string> = {
   hot: "bg-rose-500/10 text-rose-400 border-rose-500/20",
@@ -52,7 +53,7 @@ export default function LeadDetail() {
             </div>
             <div>
               <p className="text-xs text-[var(--text-muted)] font-medium">Phone</p>
-              <p className="text-sm font-semibold text-white mt-0.5">{lead.phone}</p>
+              <PhoneActions phone={lead.phone} size="md" className="mt-0.5" />
             </div>
           </div>
 

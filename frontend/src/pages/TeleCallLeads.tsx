@@ -10,6 +10,7 @@ import {
   CheckCircle2, AlertCircle, Search, X, Save, UserPlus, Edit3,
 } from "lucide-react";
 import { DatePicker } from "@/components/shared/DatePicker";
+import { PhoneActions } from "@/components/shared/PhoneActions";
 
 interface Lead {
   id: number;
@@ -494,14 +495,7 @@ export default function TeleCallLeads() {
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <p className="font-semibold text-white truncate">{lead.full_name}</p>
-                                  {lead.phone && (
-                                    <a
-                                      href={`tel:${lead.phone}`}
-                                      className="inline-flex items-center gap-1.5 text-sm text-[var(--accent-blue)] mt-0.5"
-                                    >
-                                      <Phone size={13} /> {lead.phone}
-                                    </a>
-                                  )}
+                                  <PhoneActions phone={lead.phone} size="md" className="mt-0.5" />
                                 </div>
                                 <span
                                   className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full"
@@ -582,7 +576,7 @@ export default function TeleCallLeads() {
                               {filteredLeads.map((lead) => (
                                 <tr key={lead.id} className="hover:bg-[var(--bg-card-hover)] transition-colors">
                                   <td className="py-3 px-4 font-medium text-white max-w-[180px] truncate">{lead.full_name}</td>
-                                  <td className="py-3 px-4 text-xs text-[var(--text-secondary)] font-mono">{lead.phone}</td>
+                                  <td className="py-3 px-4 text-xs text-[var(--text-secondary)] font-mono"><PhoneActions phone={lead.phone} /></td>
                                   <td className="py-3 px-4 text-xs text-[var(--text-secondary)]">
                                     {editingLead === lead.id ? (
                                       <select
@@ -768,7 +762,7 @@ export default function TeleCallLeads() {
               <div className="sticky top-0 bg-[#11131e] flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold text-white truncate">{editingLeadObj.full_name}</h3>
-                  {editingLeadObj.phone && <p className="text-xs text-[var(--text-muted)]">{editingLeadObj.phone}</p>}
+                  <PhoneActions phone={editingLeadObj.phone} className="mt-0.5" />
                 </div>
                 <button onClick={handleEditCancel} className="p-2 rounded-lg hover:bg-white/5 text-[var(--text-muted)] shrink-0">
                   <X size={18} />
