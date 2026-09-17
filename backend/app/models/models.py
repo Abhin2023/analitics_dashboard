@@ -467,9 +467,39 @@ class StrategicInsight(Base):
     deadline = Column(String(20), default="")
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # "manual" (human-authored or synced from the gr_action_plan Sheet, the
+    # long-standing behavior) vs "auto" (written by insight_engine.py from
+    # real data patterns). rule_key identifies which specific rule+entity
+    # produced an auto row, so each engine run can cleanly replace only its
+    # own previous output.
+    source = Column(String(10), default="manual")
+    rule_key = Column(String(150), nullable=True)
 
     __table_args__ = (
         Index("ix_insight_month_section", "month", "section"),
+        Index("ix_insight_month_source", "month", "source"),
+    )
+
+
+# ── Insight Resolution Log (feedback loop for the auto insight engine) ──
+class InsightResolutionLog(Base):
+    """One row per auto-detected rule_key, tracking when it was first
+    raised, last confirmed still triggering, and when it stopped (was
+    resolved) — see insight_engine.py. This is what lets the insight
+    engine's real-world usefulness be measured (resolution rate, time to
+    resolve) instead of just trusting the rules are well-tuned."""
+    __tablename__ = "insight_resolution_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    rule_key = Column(String(150), nullable=False, unique=True)
+    title = Column(String(200), nullable=False)
+    priority = Column(String(20), nullable=False)
+    month = Column(String(7), nullable=False)
+    first_detected_at = Column(DateTime, nullable=False)
+    last_seen_at = Column(DateTime, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_insight_log_month", "month"),
     )
 
 

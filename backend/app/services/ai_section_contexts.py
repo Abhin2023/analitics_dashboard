@@ -14,6 +14,7 @@ from ..models.models import (
     Store, User, DailySubmission, Lead, LostReason, Campaign, Task,
     Investment, KPIWeight, IncentiveBand,
 )
+from .sales_report_service import get_sales_report
 
 logger = logging.getLogger(__name__)
 
@@ -68,20 +69,26 @@ async def _sales_context(db: AsyncSession, month: str) -> dict:
     kpis = ops["kpis"]
     top = [{"name": t["store"], "value": _num(t["mtd"]), "sub": f"{t['ach_pct']}%", "ach_pct": t["ach_pct"]} for t in ops["top_stores"]]
     bottom = [{"name": t["store"], "value": _num(t["mtd"]), "sub": f"{t['ach_pct']}%", "ach_pct": t["ach_pct"]} for t in ops["bottom_stores"]]
+    change_pct = ops["prior_month_comparison"].get("revenue_change_pct")
     return {
         "kpis": kpis,
         "top": top,
         "bottom": bottom,
         "revenue_trend": ops["revenue_trend"],
         "tl_list": ops["tl_list"],
+        "prior_month_comparison": ops["prior_month_comparison"],
+        "detected_issues": ops["detected_issues"],
         "highlights_auto": [
             f"Top store: {top[0]['name']} at {top[0]['sub']}" if top else "No store data",
             f"{kpis['total_walkins']} walk-ins with {kpis['conv_pct']}% conversion" if kpis.get("total_walkins") else "No walk-in data",
             f"{kpis['units_sold']} units sold across {kpis['store_count']} stores" if kpis.get("units_sold") else None,
+            f"Revenue up {change_pct}% vs last month" if change_pct is not None and change_pct > 0 else None,
         ],
         "concerns_auto": [
             f"{kpis['rag']['red']} stores below 35% target" if kpis["rag"].get("red") else None,
             f"Projected {kpis['pace_vs_target_pct']}% of target at current pace" if kpis.get("pace_vs_target_pct") is not None else None,
+            f"Revenue down {abs(change_pct)}% vs last month" if change_pct is not None and change_pct < 0 else None,
+            f"{len(ops['detected_issues'])} auto-detected issue(s) this month" if ops["detected_issues"] else None,
         ],
     }
 
@@ -160,30 +167,20 @@ async def _operations_context(db: AsyncSession, month: str) -> dict:
 
 
 async def _team_leaders_context(db: AsyncSession, month: str) -> dict:
+    """Revenue/target come from the MCP-backed report (get_sales_report),
+    not a DailySubmission-only sum — that used to silently miss every
+    non-India team leader's stores entirely, plus any India store whose
+    revenue only ever arrived via MCP with no manual Sheets submission."""
     start, end = _month_range(month)
-    stores = (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()
-    tl_names = {u.id: u.name for u in (await db.execute(select(User))).scalars().all()}
+    today = date.today()
+    tl_report = await get_sales_report(
+        db, granularity="day", start=start.isoformat(), end=min(end, today).isoformat(), group_by="team_leader",
+    )
+    ranked = [
+        {"name": t["key"], "revenue": t["revenue"], "target": t["target"], "stores": t["store_count"]}
+        for t in sorted(tl_report["breakdown"], key=lambda x: x["revenue"], reverse=True)
+    ]
 
-    rev_map = {}
-    if stores:
-        rows = (await db.execute(
-            select(DailySubmission.store_id, func.sum(DailySubmission.revenue))
-            .where(DailySubmission.date >= start, DailySubmission.date <= end)
-            .group_by(DailySubmission.store_id)
-        )).all()
-        rev_map = {r[0]: _num(r[1]) for r in rows}
-
-    tls = {}
-    for s in stores:
-        tl_id = s.team_leader_id
-        if not tl_id:
-            continue
-        t = tls.setdefault(tl_id, {"name": tl_names.get(tl_id, "Unassigned"), "revenue": 0.0, "target": 0.0, "stores": 0})
-        t["revenue"] += rev_map.get(s.id, 0.0)
-        t["target"] += _num(s.monthly_target)
-        t["stores"] += 1
-
-    ranked = sorted(tls.values(), key=lambda t: t["revenue"], reverse=True)
     total_rev = round(sum(t["revenue"] for t in ranked), 2)
     total_target = round(sum(t["target"] for t in ranked), 2)
     for t in ranked:
@@ -420,11 +417,24 @@ def _resolve_band(score: float, bands: list):
 
 
 async def _performance_context(db: AsyncSession, month: str) -> dict:
+    """The revenue side of each store's score comes from the MCP-backed
+    report (get_sales_report), not a DailySubmission-only sum — that used
+    to understate/zero a store's revenue_vs_target component whenever its
+    real revenue only ever arrived via MCP sync. The other components here
+    (walk-ins, calls, stock, training, complaints) are genuinely
+    Sheets-only concepts with no MCP equivalent, so they're unaffected and
+    still require an actual Sheets submission to exist."""
     start, end = _month_range(month)
+    today = date.today()
     weights = {k.kpi_name: _num(k.weight) for k in (await db.execute(select(KPIWeight))).scalars().all()}
     bands = (await db.execute(select(IncentiveBand))).scalars().all()
     stores = (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()
     days = (end - start).days + 1
+
+    branch_report = await get_sales_report(
+        db, granularity="day", start=start.isoformat(), end=min(end, today).isoformat(), group_by="branch",
+    )
+    mcp_by_name = {b["key"]: b for b in branch_report["breakdown"]}
 
     metric_sums = {}
     band_counts = {}
@@ -438,8 +448,9 @@ async def _performance_context(db: AsyncSession, month: str) -> dict:
         )).scalars().all()
         if not subs:
             continue
-        total_rev = sum(_num(s.revenue) for s in subs)
-        target = _num(store.monthly_target) * days / 30
+        mcp = mcp_by_name.get(store.name)
+        total_rev = mcp["revenue"] if mcp else sum(_num(s.revenue) for s in subs)
+        target = mcp["target"] if mcp else _num(store.monthly_target) * days / 30
         total_walk = sum(s.walk_ins for s in subs)
         total_conv = sum(s.walk_in_conversions for s in subs)
         total_calls = sum(s.calls_made for s in subs)
@@ -606,6 +617,9 @@ SECTION_DEFAULT_PROMPTS = {
         "Output style: frame the summary as 'sales momentum and target gap'; recommendations must be actions that close "
         "the revenue gap (push best-performing stores harder, fix laggards, rebalance targets); anomalies must flag "
         "stores where pace is materially below target. "
+        "The JSON includes prior_month_comparison (revenue_change_pct vs last month) and detected_issues (real, "
+        "rule-detected problems already found in the data) — reference these directly instead of re-deriving your own "
+        "guesses; if detected_issues is non-empty, at least one anomaly or recommendation must address one of them by name. "
         "Use exact store and TL names and numbers, never invent data."
     ),
     "operations": _make_prompt(

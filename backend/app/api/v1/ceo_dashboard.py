@@ -424,6 +424,22 @@ async def ceo_actions(
     return {"critical": critical, "high": high, "strategic": strategic}
 
 
+@router.get("/insight-stats")
+async def ceo_insight_stats(
+    month: str = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = require_admin_tier(),
+):
+    """How many auto-detected issues (see insight_engine.py) were raised
+    this month, how many got resolved, and the average time to resolve —
+    the measurable feedback-loop signal for whether the insight engine is
+    catching real, fixable problems."""
+    if not month:
+        month = _month_str(date.today())
+    from ...services.insight_engine import get_insight_stats
+    return await get_insight_stats(db, month)
+
+
 # ── Sheets Data (from DB) ──────────────────────────────────────────
 @router.get("/sheets-data")
 async def ceo_sheets_data(

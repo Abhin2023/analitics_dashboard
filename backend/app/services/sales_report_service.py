@@ -194,12 +194,13 @@ async def get_sales_report(
     per_store: dict[int, dict] = {}
     for sid in store_ids:
         store_target = float(stores_by_id[sid][0].monthly_target or 0) if sid in aliased_store_ids else 0.0
-        per_store[sid] = {"revenue": 0.0, "target": store_target * month_multiplier, "walkins": 0, "conversions": 0}
+        per_store[sid] = {"revenue": 0.0, "target": store_target * month_multiplier, "walkins": 0, "conversions": 0, "units_sold": 0}
 
     trend_map: dict[str, dict] = {}
     for row in sales_rows:
         agg = per_store[row.store_id]
         agg["revenue"] += float(row.revenue or 0)
+        agg["units_sold"] += row.units_sold or 0
 
         key = _bucket_key(row.date, granularity)
         bucket = trend_map.setdefault(key, {"period": key, "revenue": 0.0})
@@ -217,6 +218,7 @@ async def get_sales_report(
     total_target = sum(per_store[sid]["target"] for sid in confirmed_ids)
     total_walkins = sum(per_store[sid]["walkins"] for sid in confirmed_ids)
     total_conversions = sum(per_store[sid]["conversions"] for sid in confirmed_ids)
+    total_units_sold = sum(per_store[sid]["units_sold"] for sid in confirmed_ids)
 
     def _group_key(sid: int) -> str:
         store, tl_name = stores_by_id[sid]
@@ -236,12 +238,13 @@ async def get_sales_report(
         # can be shown correctly instead of defaulting to INR everywhere.
         g = group_map.setdefault(key, {
             "key": key, "country": store.country, "revenue": 0.0, "target": 0.0,
-            "walkins": 0, "conversions": 0, "store_count": 0, "stores": [],
+            "walkins": 0, "conversions": 0, "units_sold": 0, "store_count": 0, "stores": [],
         })
         g["revenue"] += per_store[sid]["revenue"]
         g["target"] += per_store[sid]["target"]
         g["walkins"] += per_store[sid]["walkins"]
         g["conversions"] += per_store[sid]["conversions"]
+        g["units_sold"] += per_store[sid]["units_sold"]
         g["store_count"] += 1
         g["stores"].append(store.name)
 
@@ -282,6 +285,7 @@ async def get_sales_report(
         "total_revenue": total_revenue, "total_target": total_target,
         "achievement_pct": round(total_revenue / total_target * 100, 1) if total_target > 0 else 0,
         "total_walkins": total_walkins, "total_conversions": total_conversions,
+        "total_units_sold": total_units_sold,
         "trend": trend, "breakdown": breakdown, "needs_review": needs_review,
         "top_branch": top_branch,
     }

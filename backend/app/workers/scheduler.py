@@ -82,6 +82,22 @@ async def sync_mcp():
         logger.error("MCP sales sync error: %s", e)
 
 
+async def run_insight_engine():
+    # Recomputes the CEO Dashboard's Action Center insights from real data
+    # (revenue pace vs target, week-over-week drops, funnel-rate drops) —
+    # see app/services/insight_engine.py. Runs on its own schedule rather
+    # than piggybacking on sync_mcp/sync_all_sources, since it only needs
+    # whatever data is already in the DB at the time, from either pipeline.
+    from ..db.session import AsyncSessionLocal
+    from ..services.insight_engine import generate_auto_insights
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await generate_auto_insights(db)
+    except Exception as e:
+        logger.error("Insight engine error: %s", e)
+
+
 def start_scheduler():
     if os.getenv("ENABLE_SCHEDULER", "1") != "1":
         logger.info("Scheduler disabled via ENABLE_SCHEDULER=0")
@@ -127,5 +143,15 @@ def start_scheduler():
         coalesce=True,
         misfire_grace_time=600,
     )
+    scheduler.add_job(
+        run_insight_engine,
+        "interval",
+        minutes=30,
+        id="insight_engine",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     scheduler.start()
-    logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min, MCP sync: 15min)")
+    logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min, MCP sync: 15min, insight engine: 30min)")

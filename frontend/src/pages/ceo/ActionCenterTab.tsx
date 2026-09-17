@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { processOpsData, formatINR, ragColor } from "./types";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
+import { api } from "@/lib/apiClient";
 
 function ActionTable({ items, color }: { items: any[]; color: string }) {
   if (items.length === 0) return null;
@@ -24,7 +25,10 @@ function ActionTable({ items, color }: { items: any[]; color: string }) {
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#1e2749")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 <td style={{ padding: "8px 10px", fontWeight: 600, color: "#e2e8f0" }}>{r.area}</td>
-                <td style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>{r.issue}</td>
+                <td style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>
+                  {r.auto && <span style={{ padding: "1px 6px", borderRadius: 8, fontSize: 9, fontWeight: 700, background: "#134e4a", color: "#5eead4", marginRight: 6 }}>AUTO-DETECTED</span>}
+                  {r.issue}
+                </td>
                 <td style={{ padding: "8px 10px" }}><span style={{ padding: "2px 8px", borderRadius: 12, fontSize: 10, fontWeight: 700, background: "#1e3a5f", color: "#93c5fd" }}>{r.assign}</span></td>
                 <td style={{ padding: "8px 10px", fontSize: 11, color: "#cbd5e1" }}>{r.action}</td>
               </tr>
@@ -40,9 +44,31 @@ export function ActionCenterTab({ data }: { data: any }) {
   useSocketRefresh(["sheets-data"]);
   const opsData = data?.ops_data || [];
   const reviews = data?.reviews || [];
-  const grPlan = data?.gr_action_plan || [];
   const staff = data?.staff || [];
   const intlStaff = data?.intl_staff || [];
+
+  // Auto-detected insights (revenue pace vs target, week-over-week drops,
+  // funnel-rate drops) computed from real MCP/Sheets data by
+  // insight_engine.py — see StrategicInsight.source == "auto". These are
+  // separate from the hardcoded checks below, which only ever look at the
+  // current Sheets ops_data snapshot and can't see MCP-only branches.
+  const [autoInsights, setAutoInsights] = useState<{ critical: any[]; high: any[]; strategic: any[] }>({ critical: [], high: [], strategic: [] });
+  // Feedback loop (see insight_engine.py get_insight_stats): how many
+  // auto-detected issues actually got resolved this month, and how fast —
+  // the honest, measurable signal for whether these rules catch real,
+  // fixable problems rather than just noise.
+  const [insightStats, setInsightStats] = useState<{ total_raised: number; resolved_count: number; open_count: number; avg_resolution_hours: number | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.fetchRaw("/ceo-dashboard/actions").then(async (res) => {
+      if (res.ok && !cancelled) setAutoInsights(await res.json());
+    }).catch(() => {});
+    api.fetchRaw("/ceo-dashboard/insight-stats").then(async (res) => {
+      if (res.ok && !cancelled) setInsightStats(await res.json());
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const toItem = (i: any) => ({ area: i.title, issue: i.description, assign: i.assigned_to || "Unassigned", action: i.action, auto: true });
 
   const ops = useMemo(() => processOpsData(opsData), [opsData]);
 
@@ -74,8 +100,8 @@ export function ActionCenterTab({ data }: { data: any }) {
     for (const s of riskStaff.slice(0, 2)) {
       items.push({ area: s.store, issue: s.resource_required + " staff needed - current: " + s.staff_count, assign: s.tl, action: "Hiring priority - fill position within 2 weeks" });
     }
-    return items;
-  }, [ops, validStaff]);
+    return items.concat(autoInsights.critical.map(toItem));
+  }, [ops, validStaff, autoInsights]);
 
   const highItems = useMemo(() => {
     const items: any[] = [];
@@ -89,8 +115,8 @@ export function ActionCenterTab({ data }: { data: any }) {
         items.push({ area: s.store, issue: s.achPct + "% achievement - on the edge of Red", assign: s.tl, action: "Weekly performance check + marketing push" });
       }
     }
-    return items;
-  }, [ops]);
+    return items.concat(autoInsights.high.map(toItem));
+  }, [ops, autoInsights]);
 
   const strategicItems = useMemo(() => {
     const items: any[] = [];
@@ -102,8 +128,8 @@ export function ActionCenterTab({ data }: { data: any }) {
     for (const s of trainingStores.slice(0, 2)) {
       items.push({ area: s.store, issue: "Staff in training - needs onboarding support", assign: s.tl, action: "Ensure training completion checklist is followed" });
     }
-    return items;
-  }, [validReviews, validStaff]);
+    return items.concat(autoInsights.strategic.map(toItem));
+  }, [validReviews, validStaff, autoInsights]);
 
   const allItems = [...criticalItems, ...highItems, ...strategicItems];
 
@@ -150,8 +176,24 @@ export function ActionCenterTab({ data }: { data: any }) {
   return (
     <div>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#93c5fd", marginBottom: 14, paddingBottom: 6, borderBottom: "1px solid #2d3748" }}>
-        Action Center - Derived from Live Sheet Data
+        Action Center - Derived from Live Sheet Data + Auto-Detected Insights
       </div>
+
+      {insightStats && insightStats.total_raised > 0 && (
+        <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+          {[
+            { label: "Auto-Detected This Month", value: insightStats.total_raised, color: "#5eead4" },
+            { label: "Resolved", value: insightStats.resolved_count, color: "#10b981" },
+            { label: "Still Open", value: insightStats.open_count, color: "#f87171" },
+            { label: "Avg Time to Resolve", value: insightStats.avg_resolution_hours != null ? `${insightStats.avg_resolution_hours}h` : "—", color: "#94a3b8" },
+          ].map((k, i) => (
+            <div key={i} style={{ background: "#1e2336", border: "1px solid #2d3748", borderRadius: 10, padding: "10px 16px", flex: "1 1 160px" }}>
+              <div style={{ fontSize: 9, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{k.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: k.color }}>{k.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {allItems.length === 0 ? (
         <div style={{ background: "#1e2336", border: "1px solid #2d3748", borderRadius: 10, padding: 40, textAlign: "center", color: "#94a3b8" }}>

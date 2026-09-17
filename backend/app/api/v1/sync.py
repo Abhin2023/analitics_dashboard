@@ -21,6 +21,17 @@ async def manual_mcp_sync(
     return await sync_mcp_sales(db, from_date, to_date)
 
 
+@router.post("/insights")
+async def manual_insight_run(
+    db: AsyncSession = Depends(get_db),
+    _user: User = require_permission("dashboard", "view"),
+):
+    """Recompute the CEO Dashboard's auto-detected Action Center insights
+    right now, instead of waiting for the next scheduled run."""
+    from ...services.insight_engine import generate_auto_insights
+    return await generate_auto_insights(db)
+
+
 @router.get("/mcp/status")
 async def mcp_sync_status(
     db: AsyncSession = Depends(get_db),

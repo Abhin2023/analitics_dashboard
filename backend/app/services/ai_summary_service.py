@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.models import (
     Store, User, DailySubmission, MarketingMetrics, StoreStaff,
     InternationalStore, GoogleReview, DailyStoreTracker, AISummaryConfig, AISummaryRun,
+    StrategicInsight,
 )
 from ..instagram.models import AIProvider
 from ..instagram.ai_service import ClaudeProvider, OpenAIProvider, ai_service
@@ -21,6 +22,7 @@ from ..instagram.utils import decrypt_token
 from .ai_section_contexts import (
     build_section_context, SECTION_TITLES, SECTION_DEFAULT_PROMPTS,
 )
+from .sales_report_service import get_sales_report
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,10 @@ Rules:
 - recommendations and anomalies: limit to 6 items total each, ordered by importance.
 - Use exact store and TL names from the data.
 - Put numbers (percentages, amounts) from the data into the text.
+- ops.prior_month_comparison shows revenue_change_pct vs last month, and ops.detected_issues lists real,
+  rule-detected problems already found in the data — reference these directly instead of re-deriving your own
+  guesses; if ops.detected_issues is non-empty, at least one anomaly or recommendation must address one of them
+  by name.
 - Do NOT wrap the JSON in markdown code fences."""
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -84,68 +90,51 @@ def _fingerprint(payload: dict) -> str:
 
 # ── Context builder ────────────────────────────────────────────────────────
 async def _ops_context(db: AsyncSession, month: str) -> dict:
+    """Revenue/target here come from the same MCP-backed report every other
+    page now uses (sales_report_service.get_sales_report) — this used to
+    sum DailySubmission (Google Sheets) revenue only, which silently
+    excluded every non-India country entirely, plus any India branch whose
+    real revenue only ever arrived via the newer MCP sync with no manual
+    daily Sheets submission on file. Walk-ins/conversions still come from
+    Sheets under the hood for India (get_sales_report already blends that
+    in per store); units_sold now comes from MCP (McpDailySale.units_sold),
+    which covers every country instead of just India.
+    """
     start = date.fromisoformat(f"{month}-01")
     nxt = start.replace(day=28) + timedelta(days=4)
     end = nxt - timedelta(days=nxt.day)
+    today = date.today()
+    effective_end = min(end, today)
 
-    stores = (await db.execute(select(Store).where(Store.is_active == True))).scalars().all()
-    store_ids = [s.id for s in stores]
+    branch_report = await get_sales_report(
+        db, granularity="day", start=start.isoformat(), end=effective_end.isoformat(), group_by="branch",
+    )
+    tl_report = await get_sales_report(
+        db, granularity="day", start=start.isoformat(), end=effective_end.isoformat(), group_by="team_leader",
+    )
 
-    tl_names = {}
-    tl_ids = {s.id: s.team_leader_id for s in stores}
-    for tl_id in set(filter(None, tl_ids.values())):
-        r = await db.execute(select(User.name).where(User.id == tl_id))
-        tl_names[tl_id] = r.scalar() or "Unassigned"
+    store_rows = (await db.execute(
+        select(Store, User.name.label("tl_name")).outerjoin(User, Store.team_leader_id == User.id)
+        .where(Store.is_active == True)
+    )).all()
+    tl_by_store_name = {s.name: (tl_name or "Unassigned") for s, tl_name in store_rows}
 
-    store_ach = []
-    for s in stores:
-        rev = float((await db.execute(
-            select(func.coalesce(func.sum(DailySubmission.revenue), 0)).where(
-                DailySubmission.store_id == s.id,
-                DailySubmission.date >= start,
-                DailySubmission.date <= end,
-            )
-        )).scalar() or 0)
-        tgt = float(s.monthly_target or 0)
-        walkins = int((await db.execute(
-            select(func.coalesce(func.sum(DailySubmission.walk_ins), 0)).where(
-                DailySubmission.store_id == s.id,
-                DailySubmission.date >= start,
-                DailySubmission.date <= end,
-            )
-        )).scalar() or 0)
-        sales = int((await db.execute(
-            select(func.coalesce(func.sum(DailySubmission.walk_in_conversions), 0)).where(
-                DailySubmission.store_id == s.id,
-                DailySubmission.date >= start,
-                DailySubmission.date <= end,
-            )
-        )).scalar() or 0)
-        units = int((await db.execute(
-            select(func.coalesce(func.sum(DailySubmission.units_sold), 0)).where(
-                DailySubmission.store_id == s.id,
-                DailySubmission.date >= start,
-                DailySubmission.date <= end,
-            )
-        )).scalar() or 0)
-        store_ach.append({
-            "store": s.name,
-            "tl": tl_names.get(s.team_leader_id, "Unassigned"),
-            "mtd": round(rev, 2),
-            "target": round(tgt, 2),
-            "ach_pct": round(rev / tgt * 100, 1) if tgt > 0 else 0,
-            "walkins": walkins,
-            "sales": sales,
-            "conv_pct": round(sales / walkins * 100, 1) if walkins > 0 else 0,
-            "units_sold": units,
-        })
-
+    store_ach = [
+        {
+            "store": b["key"], "tl": tl_by_store_name.get(b["key"], "Unassigned"),
+            "mtd": round(b["revenue"], 2), "target": round(b["target"], 2),
+            "ach_pct": b["achievement_pct"], "walkins": b["walkins"], "sales": b["conversions"],
+            "conv_pct": round(b["conversions"] / b["walkins"] * 100, 1) if b["walkins"] > 0 else 0,
+            "units_sold": b["units_sold"],
+        }
+        for b in branch_report["breakdown"]
+    ]
     store_ach.sort(key=lambda x: x["ach_pct"], reverse=True)
 
-    total_revenue = sum(s["mtd"] for s in store_ach)
-    total_target = sum(s["target"] for s in store_ach)
-    total_walkins = sum(s["walkins"] for s in store_ach)
-    total_conversions = sum(s["sales"] for s in store_ach)
+    total_revenue = branch_report["total_revenue"]
+    total_target = branch_report["total_target"]
+    total_walkins = branch_report["total_walkins"]
+    total_conversions = branch_report["total_conversions"]
 
     rag = {
         "green": sum(1 for s in store_ach if s["ach_pct"] >= 65),
@@ -153,35 +142,48 @@ async def _ops_context(db: AsyncSession, month: str) -> dict:
         "red": sum(1 for s in store_ach if s["ach_pct"] < 35),
     }
 
-    tl_map = {}
-    for s in store_ach:
-        tl = s["tl"]
-        if tl not in tl_map:
-            tl_map[tl] = {"name": tl, "target": 0, "achieved": 0, "walkins": 0, "conv": 0, "stores": []}
-        tl_map[tl]["target"] += s["target"]
-        tl_map[tl]["achieved"] += s["mtd"]
-        tl_map[tl]["walkins"] += s["walkins"]
-        tl_map[tl]["conv"] += s["sales"]
-        tl_map[tl]["stores"].append(s["store"])
-    tl_list = []
-    for t in tl_map.values():
-        t["ach_pct"] = round(t["achieved"] / t["target"] * 100, 1) if t["target"] > 0 else 0
-        tl_list.append(t)
-    tl_list.sort(key=lambda x: x["achieved"], reverse=True)
+    tl_list = [
+        {
+            "name": t["key"], "achieved": round(t["revenue"], 2), "target": round(t["target"], 2),
+            "ach_pct": t["achievement_pct"], "store_count": t["store_count"],
+        }
+        for t in sorted(tl_report["breakdown"], key=lambda x: x["revenue"], reverse=True)
+    ]
 
-    # Daily revenue trend (last 30 days)
-    trend_start = date.today() - timedelta(days=29)
-    rows = (await db.execute(
-        select(DailySubmission.date, func.sum(DailySubmission.revenue))
-        .where(DailySubmission.date >= trend_start, DailySubmission.date <= date.today())
-        .group_by(DailySubmission.date)
-        .order_by(DailySubmission.date)
-    )).all()
-    trend = [{"date": str(r[0]), "revenue": round(float(r[1] or 0), 2)} for r in rows]
+    # Daily revenue trend (last 30 days) — also MCP-backed now.
+    trend_start = today - timedelta(days=29)
+    trend_report = await get_sales_report(
+        db, granularity="day", start=trend_start.isoformat(), end=today.isoformat(), group_by="none",
+    )
+    trend = [{"date": t["period"], "revenue": round(t["revenue"], 2)} for t in trend_report["trend"]]
 
-    days_elapsed = max(1, (date.today() - start).days + 1)
+    days_elapsed = max(1, (today - start).days + 1)
     days_in_month = (end - start).days + 1
     pace = round(total_revenue / days_elapsed * days_in_month, 2) if days_elapsed > 0 else total_revenue
+
+    # Prior month totals, so the AI narrative can say "improving/declining
+    # vs last month" instead of just describing a single point-in-time
+    # snapshot with no sense of direction.
+    prev_month_end = start - timedelta(days=1)
+    prev_month_start = prev_month_end.replace(day=1)
+    prior_report = await get_sales_report(
+        db, granularity="day", start=prev_month_start.isoformat(), end=prev_month_end.isoformat(), group_by="none",
+    )
+    prior_revenue = prior_report["total_revenue"]
+    revenue_change_pct = (
+        round((total_revenue - prior_revenue) / prior_revenue * 100, 1) if prior_revenue > 0 else None
+    )
+
+    # Real, rule-detected issues (see insight_engine.py) — gives the LLM
+    # actual data-backed findings to reference and expand on, instead of
+    # re-deriving its own guesses from raw numbers every time.
+    insight_rows = (await db.execute(
+        select(StrategicInsight).where(StrategicInsight.month == month, StrategicInsight.source == "auto")
+        .order_by(StrategicInsight.sort_order)
+    )).scalars().all()
+    detected_issues = [
+        {"priority": i.priority, "store": i.title, "issue": i.description} for i in insight_rows
+    ]
 
     return {
         "kpis": {
@@ -191,7 +193,7 @@ async def _ops_context(db: AsyncSession, month: str) -> dict:
             "total_walkins": total_walkins,
             "total_conversions": total_conversions,
             "conv_pct": round(total_conversions / max(total_walkins, 1) * 100, 1),
-            "units_sold": sum(s["units_sold"] for s in store_ach),
+            "units_sold": branch_report.get("total_units_sold", 0),
             "store_count": len(store_ach),
             "tl_count": len(tl_list),
             "rag": rag,
@@ -201,8 +203,13 @@ async def _ops_context(db: AsyncSession, month: str) -> dict:
         },
         "top_stores": store_ach[:5],
         "bottom_stores": list(reversed(store_ach[-5:])) if store_ach else [],
-        "tl_list": [{"name": t["name"], "achieved": round(t["achieved"], 2), "target": round(t["target"], 2), "ach_pct": t["ach_pct"], "store_count": len(t["stores"])} for t in tl_list],
+        "tl_list": tl_list,
         "revenue_trend": trend,
+        "prior_month_comparison": {
+            "prior_month_revenue": round(prior_revenue, 2),
+            "revenue_change_pct": revenue_change_pct,
+        },
+        "detected_issues": detected_issues,
     }
 
 
