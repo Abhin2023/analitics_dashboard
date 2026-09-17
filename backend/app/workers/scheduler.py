@@ -64,6 +64,24 @@ async def sync_tele_call_leads():
         logger.error("Tele call leads sync error: %s", e)
 
 
+async def sync_mcp():
+    # Keeps mcp_daily_sales and every store's monthly_target fresh from MCP
+    # automatically, independent of anyone clicking "Sync Now" — that manual
+    # button still exists for an on-demand refresh, but relying on it alone
+    # let the DB silently drift out of date (stale targets, revenue) for as
+    # long as nobody happened to click it. The dashboard still only ever
+    # reads from the DB, never calling MCP live on page load, so this keeps
+    # the fast-load design while removing the staleness risk.
+    from ..db.session import AsyncSessionLocal
+    from ..services.mcp_sync_service import sync_mcp_sales
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await sync_mcp_sales(db)
+    except Exception as e:
+        logger.error("MCP sales sync error: %s", e)
+
+
 def start_scheduler():
     if os.getenv("ENABLE_SCHEDULER", "1") != "1":
         logger.info("Scheduler disabled via ENABLE_SCHEDULER=0")
@@ -99,5 +117,15 @@ def start_scheduler():
         coalesce=True,
         misfire_grace_time=600,
     )
+    scheduler.add_job(
+        sync_mcp,
+        "interval",
+        minutes=15,
+        id="mcp_sales_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     scheduler.start()
-    logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min)")
+    logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min, MCP sync: 15min)")

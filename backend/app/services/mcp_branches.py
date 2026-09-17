@@ -62,7 +62,7 @@ async def _get_india_branches_from_db(db: AsyncSession) -> list[dict[str, Any]]:
     now = datetime.now()
     month_start = date(now.year, now.month, 1)
 
-    store_q = select(Store).where(Store.is_active == True)
+    store_q = select(Store).where(Store.is_active == True, Store.country == "India")
     stores = (await db.execute(store_q)).scalars().all()
 
     branches = []
