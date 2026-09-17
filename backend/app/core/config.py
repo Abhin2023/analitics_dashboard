@@ -13,6 +13,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "mysql+aiomysql://root@localhost:3306/bp_analytics"
     JWT_SECRET_KEY: str = ""
+    TOKEN_ENCRYPTION_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     SECURE_COOKIES: bool = False
