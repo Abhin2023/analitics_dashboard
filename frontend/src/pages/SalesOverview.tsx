@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/apiClient";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -22,70 +22,155 @@ const COUNTRY_COLORS: Record<string, string> = {
 function fmtCurrency(n: number, country: string) {
   switch (country) {
     case "India": {
-      if (n >= 10000000) return `\u20b9${(n / 10000000).toFixed(2)} Cr`;
-      if (n >= 100000) return `\u20b9${(n / 100000).toFixed(1)}L`;
-      if (n >= 1000) return `\u20b9${(n / 1000).toFixed(1)}K`;
-      return `\u20b9${n.toLocaleString("en-IN")}`;
+      if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`;
+      if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+      if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
+      return `₹${n.toLocaleString("en-IN")}`;
     }
     case "UAE": return `AED ${(n / 1000).toFixed(1)}K`;
     case "Oman": return `OMR ${(n / 1000).toFixed(1)}K`;
     case "Qatar": return `QAR ${(n / 1000).toFixed(1)}K`;
     case "Pakistan": return `PKR ${(n / 100000).toFixed(1)}L`;
     case "Malaysia": return `MYR ${(n / 1000).toFixed(1)}K`;
-    case "UK": return `\u00a3${(n / 1000).toFixed(1)}K`;
+    case "UK": return `£${(n / 1000).toFixed(1)}K`;
     case "Bahrain": return `BHD ${(n / 1000).toFixed(1)}K`;
     default: return `$${(n / 1000).toFixed(1)}K`;
   }
 }
 
-function fmtShort(n: number) {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(Math.round(n));
+function localDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeName(n: string) {
+  return (n || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 export default function SalesOverview() {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") || "main";
   useSocketRefresh(["sales"]);
+
   const [branches, setBranches] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [report, setReport] = useState<any>(null);
+  const [reportLoading, setReportLoading] = useState(true);
   const [storeFilter, setStoreFilter] = useState("");
-  const [countryFilter, setCountryFilter] = useState("");
+  // Blank = "All Countries" — valid for the store table/list, but the top
+  // Revenue/Target KPIs never blend raw values across countries (₹ + AED +
+  // OMR + ... summed together is meaningless), so those cards only render
+  // once a single country is picked, same convention the main Dashboard
+  // page uses.
+  const [countryFilter, setCountryFilter] = useState("India");
+
+  const [period, setPeriod] = useState<"1day" | "7day" | "month" | "custom">("month");
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [showRangeFilter, setShowRangeFilter] = useState(false);
+  const [draftRange, setDraftRange] = useState({ from: "", to: "" });
+  const rangeFilterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showRangeFilter) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (rangeFilterRef.current && !rangeFilterRef.current.contains(e.target as Node)) {
+        setShowRangeFilter(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showRangeFilter]);
+
+  const effectiveRange = useMemo(() => {
+    const now = new Date();
+    const to = localDateStr(now);
+    if (period === "custom" && customRange) return customRange;
+    if (period === "1day") return { from: to, to };
+    const from = new Date(now);
+    if (period === "7day") from.setDate(from.getDate() - 6);
+    else from.setMonth(from.getMonth() - 1); // "month": rolling 30 days
+    return { from: localDateStr(from), to };
+  }, [period, customRange]);
 
   const fetchBranches = useCallback(async () => {
-    setLoading(true);
+    setBranchesLoading(true);
     try {
+      // Stock is a live, point-in-time figure (not something that can be
+      // read "as of 7 days ago"), so it's fetched once, independent of the
+      // period filter, and merged onto each period-scoped row by name below.
       const res = await api.fetchRaw("/mcp/branches");
       if (res.ok) setBranches(await res.json());
     } catch {}
-    setLoading(false);
+    setBranchesLoading(false);
   }, []);
 
+  const fetchReport = useCallback(async () => {
+    setReportLoading(true);
+    try {
+      // No country param here — always pull every country in one call and
+      // filter client-side, the same way the store-name search already
+      // works, so switching countries/periods doesn't refetch twice.
+      const params = `group_by=branch&granularity=day&start=${effectiveRange.from}&end=${effectiveRange.to}`;
+      const res = await api.fetchRaw(`/sales-reports?${params}`);
+      if (res.ok) setReport(await res.json());
+    } catch {}
+    setReportLoading(false);
+  }, [effectiveRange]);
+
   useEffect(() => { fetchBranches(); }, [fetchBranches]);
+  useEffect(() => { fetchReport(); }, [fetchReport]);
+
+  const loading = branchesLoading || reportLoading;
+
+  const stockByName = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const b of branches) {
+      if (b.shop) m.set(normalizeName(b.shop), b);
+    }
+    return m;
+  }, [branches]);
+
+  // Combines the period-scoped revenue/target/achievement from
+  // /sales-reports with the always-current stock figure from /mcp/branches,
+  // matched by store name.
+  const allStores = useMemo(() => {
+    return (report?.breakdown || []).map((r: any) => {
+      const stock = stockByName.get(normalizeName(r.key));
+      return {
+        shop: r.key,
+        country: r.country,
+        actual: r.revenue,
+        target: r.target,
+        achievement_pct: r.achievement_pct,
+        stock_units: stock?.stock_units || 0,
+        stock_items: stock?.stock_items || [],
+      };
+    });
+  }, [report, stockByName]);
 
   const stores = useMemo(() => {
-    return branches
-      .filter((b) => {
+    return allStores
+      .filter((b: any) => {
         if (storeFilter && !b.shop.toLowerCase().includes(storeFilter.toLowerCase())) return false;
         if (countryFilter && b.country !== countryFilter) return false;
         return true;
       })
-      .sort((a, b) => b.achievement_pct - a.achievement_pct);
-  }, [branches, storeFilter, countryFilter]);
+      .sort((a: any, b: any) => b.achievement_pct - a.achievement_pct);
+  }, [allStores, storeFilter, countryFilter]);
 
   const uniqueCountries = useMemo(() => {
-    const cs = new Set<string>(branches.map((b: any) => b.country).filter(Boolean));
+    const cs = new Set<string>(allStores.map((b: any) => b.country).filter(Boolean));
     return Array.from(cs).sort();
-  }, [branches]);
+  }, [allStores]);
 
-  const uniqueStores = useMemo(() => {
-    const ss = new Set<string>(branches.map((b: any) => b.shop).filter(Boolean));
-    return Array.from(ss).sort();
-  }, [branches]);
-
-  const totalRevenue = stores.reduce((s, st) => s + (st.actual || 0), 0);
-  const totalTarget = stores.reduce((s, st) => s + (st.target || 0), 0);
+  // Only meaningful in a single currency — blank (All Countries) leaves
+  // these unset rather than adding ₹ + AED + OMR + ... into one number.
+  const singleCountrySelected = countryFilter && uniqueCountries.includes(countryFilter);
+  const countryStores = useMemo(
+    () => (singleCountrySelected ? allStores.filter((s: any) => s.country === countryFilter) : []),
+    [allStores, countryFilter, singleCountrySelected]
+  );
+  const totalRevenue = countryStores.reduce((s: number, st: any) => s + (st.actual || 0), 0);
+  const totalTarget = countryStores.reduce((s: number, st: any) => s + (st.target || 0), 0);
   const overallAch = totalTarget > 0 ? (totalRevenue / totalTarget * 100) : 0;
   const countryCount = uniqueCountries.length;
 
@@ -96,28 +181,119 @@ export default function SalesOverview() {
       ) : (
         <div className="space-y-6">
 
+        {/* Period filter */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--bg-card)] border border-[var(--border-subtle)] p-3 rounded-2xl">
+          <div className="text-xs text-[var(--text-muted)]">
+            Showing {effectiveRange.from} to {effectiveRange.to}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-xl border border-[var(--border-subtle)] bg-white/5 p-0.5">
+              {([
+                { key: "1day", label: "Today" },
+                { key: "7day", label: "7 Days" },
+                { key: "month", label: "Monthly" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => setPeriod(opt.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                    period === opt.key
+                      ? "bg-[var(--accent-blue)] text-white"
+                      : "text-[var(--text-secondary)] hover:text-white"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div className="relative" ref={rangeFilterRef}>
+              <button
+                onClick={() => {
+                  setDraftRange(period === "custom" && customRange ? customRange : effectiveRange);
+                  setShowRangeFilter((v) => !v);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition ${
+                  period === "custom"
+                    ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                    : "bg-white/5 border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-white/10"
+                }`}
+              >
+                <Filter size={14} />
+                Custom
+              </button>
+              {showRangeFilter && (
+                <div className="absolute right-0 mt-2 w-72 rounded-xl bg-[#11131e] border border-[var(--border-subtle)] shadow-2xl p-4 z-50 text-xs space-y-3">
+                  <p className="font-semibold text-white">Custom date range</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] text-[var(--text-muted)] block mb-0.5">From</span>
+                      <input
+                        type="date"
+                        value={draftRange.from}
+                        onChange={(e) => setDraftRange((p) => ({ ...p, from: e.target.value }))}
+                        className="w-full bg-[var(--bg-primary)] border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-[var(--text-muted)] block mb-0.5">To</span>
+                      <input
+                        type="date"
+                        value={draftRange.to}
+                        onChange={(e) => setDraftRange((p) => ({ ...p, to: e.target.value }))}
+                        className="w-full bg-[var(--bg-primary)] border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      onClick={() => { setPeriod("month"); setCustomRange(null); setShowRangeFilter(false); }}
+                      className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[var(--text-secondary)]"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (draftRange.from && draftRange.to) {
+                          setCustomRange(draftRange);
+                          setPeriod("custom");
+                        }
+                        setShowRangeFilter(false);
+                      }}
+                      disabled={!draftRange.from || !draftRange.to}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Summary KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
           {[
-            { label: "Total Revenue", value: fmtShort(totalRevenue), color: "#3b82f6" },
-            { label: "Total Target", value: fmtShort(totalTarget), color: "#10b981" },
-            { label: "Achievement", value: `${overallAch.toFixed(1)}%`, color: overallAch >= 50 ? "#10b981" : "#f59e0b" },
+            { label: "Total Revenue", value: singleCountrySelected ? fmtCurrency(totalRevenue, countryFilter) : "Select a country", color: "#3b82f6" },
+            { label: "Total Target", value: singleCountrySelected ? fmtCurrency(totalTarget, countryFilter) : "Select a country", color: "#10b981" },
+            { label: "Achievement", value: singleCountrySelected ? `${overallAch.toFixed(1)}%` : "—", color: overallAch >= 50 ? "#10b981" : "#f59e0b" },
             { label: "Total Branches", value: String(stores.length), color: "#a855f7" },
             { label: "Countries", value: String(countryCount), color: "#ec4899" },
           ].map((k, i) => (
             <div key={i} className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4 relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-0.5" style={{ background: k.color }} />
               <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-1">{k.label}</p>
-              <p className="text-xl font-extrabold text-white">{k.value}</p>
+              <p className={k.value.length > 8 ? "text-base font-extrabold text-white" : "text-xl font-extrabold text-white"}>{k.value}</p>
             </div>
           ))}
         </div>
 
-        {/* Country summary badges */}
+        {/* Country summary badges — each button shows that country's own total in its own currency, never blended with another country's */}
         <div className="flex flex-wrap gap-2">
           {uniqueCountries.map((country) => {
-            const count = branches.filter((b) => b.country === country).length;
-            const rev = branches.filter((b) => b.country === country).reduce((s, b) => s + (b.actual || 0), 0);
+            const countryRows = allStores.filter((b: any) => b.country === country);
+            const count = countryRows.length;
+            const rev = countryRows.reduce((s: number, b: any) => s + (b.actual || 0), 0);
             return (
               <button
                 key={country}
@@ -129,7 +305,7 @@ export default function SalesOverview() {
                 }`}
               >
                 <span className="w-2 h-2 rounded-full" style={{ background: COUNTRY_COLORS[country] || "#6b7280" }} />
-                {country} ({count}) — {fmtShort(rev)}
+                {country} ({count}) — {fmtCurrency(rev, country)}
               </button>
             );
           })}
@@ -156,7 +332,7 @@ export default function SalesOverview() {
             ))}
           </select>
           <button
-            onClick={fetchBranches}
+            onClick={() => { fetchBranches(); fetchReport(); }}
             disabled={loading}
             className="ml-auto flex items-center gap-2 px-3 py-2 text-xs rounded-xl border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-white disabled:opacity-50"
           >
@@ -186,7 +362,7 @@ export default function SalesOverview() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border-subtle)]">
-                  {stores.map((s, i) => (
+                  {stores.map((s: any, i: number) => (
                     <tr key={i} className="hover:bg-[var(--bg-card-hover)] transition-colors">
                       <td className="py-3.5 px-4 text-xs text-[var(--text-muted)]">{i + 1}</td>
                       <td className="py-3.5 px-4 font-medium text-white flex items-center gap-3">
@@ -234,7 +410,7 @@ export default function SalesOverview() {
           )}
         </div>
       </div>
-    
+
       )}
     </ErrorBoundary>
   );
