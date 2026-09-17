@@ -11,6 +11,8 @@ export default function AIProviders() {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [apiKeys, setApiKeys] = useState<Record<number, string>>({});
   const [showKey, setShowKey] = useState<Record<number, boolean>>({});
+  const [saveError, setSaveError] = useState<Record<number, string>>({});
+  const [savedFlash, setSavedFlash] = useState<Record<number, boolean>>({});
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -25,8 +27,23 @@ export default function AIProviders() {
   const updateMutation = useMutation({
     mutationFn: ({ id, api_key, model_name }: { id: number; api_key?: string; model_name?: string }) =>
       api.put(`/instagram/ai-providers/${id}`, { api_key, model_name }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["ai-providers"] });
+      if (variables.api_key) {
+        // Only clear the typed key and show confirmation once the save has
+        // actually succeeded — clearing it unconditionally on click made a
+        // silently-failed save (permission error, network blip, etc.) look
+        // exactly like a successful one, since the field went blank either way.
+        setApiKeys((prev) => ({ ...prev, [variables.id]: "" }));
+        setSaveError((prev) => ({ ...prev, [variables.id]: "" }));
+        setSavedFlash((prev) => ({ ...prev, [variables.id]: true }));
+        setTimeout(() => setSavedFlash((prev) => ({ ...prev, [variables.id]: false })), 3000);
+      }
+    },
+    onError: (err: any, variables) => {
+      if (variables.api_key) {
+        setSaveError((prev) => ({ ...prev, [variables.id]: err?.message || "Save failed — key was not updated." }));
+      }
     },
   });
 
@@ -42,7 +59,6 @@ export default function AIProviders() {
     const key = apiKeys[id];
     if (key) {
       updateMutation.mutate({ id, api_key: key });
-      setApiKeys((prev) => ({ ...prev, [id]: "" }));
     }
   };
 
@@ -173,6 +189,16 @@ export default function AIProviders() {
                         </button>
                       )}
                     </div>
+                    {saveError[provider.id] && (
+                      <p className="text-xs text-rose-400 mt-1.5 flex items-center gap-1.5">
+                        <XCircle size={12} /> {saveError[provider.id]}
+                      </p>
+                    )}
+                    {savedFlash[provider.id] && (
+                      <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1.5">
+                        <CheckCircle size={12} /> Key saved.
+                      </p>
+                    )}
                   </div>
 
                   {/* Status */}
