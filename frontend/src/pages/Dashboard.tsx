@@ -889,7 +889,20 @@ export default function Dashboard() {
                         <Cell fill="#10b981" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" />
                       </Pie>
                       <Tooltip contentStyle={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border-subtle)", borderRadius: "12px", fontSize: "12px" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
-                      <Legend wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }} />
+                      {/* A bare <Legend> next to a single <Pie> doesn't reliably map
+                          each slice's color to its label — passing an explicit
+                          payload guarantees the right color swatch next to the
+                          right label, with the actual store count included. */}
+                      <Legend
+                        wrapperStyle={{ fontSize: 11, color: "#a1a1aa" }}
+                        {...({
+                          payload: [
+                            { value: `Green ≥65% (${ops.rag.green} stores)`, type: "square", color: "#10b981" },
+                            { value: `Amber 35–64% (${ops.rag.amber} stores)`, type: "square", color: "#f59e0b" },
+                            { value: `Red <35% (${ops.rag.red} stores)`, type: "square", color: "#ef4444" },
+                          ],
+                        } as any)}
+                      />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>

@@ -119,7 +119,15 @@ export function OverviewTab({ data }: { data: any }) {
                 ))}
               </Pie>
               <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)" }} labelStyle={{ color: "var(--text-primary)" }} itemStyle={{ color: "var(--text-primary)" }} />
-              <Legend wrapperStyle={{ fontSize: 11, color: "#94a3b8" }} />
+              {/* A bare <Legend> next to a single <Pie> doesn't reliably map each
+                  slice's color to its label — an explicit payload guarantees the
+                  right color swatch next to the right label, with the count included. */}
+              <Legend
+                wrapperStyle={{ fontSize: 11, color: "#94a3b8" }}
+                {...({
+                  payload: ragData.map((r, i) => ({ value: `${r.name} (${r.value})`, type: "square", color: ["#10b981", "#f59e0b", "#ef4444"][i] })),
+                } as any)}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
