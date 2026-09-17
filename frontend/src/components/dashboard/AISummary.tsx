@@ -10,7 +10,6 @@ import {
 } from "recharts";
 import { api } from "@/lib/apiClient";
 import { useAuthStore } from "@/lib/authStore";
-import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 import { getSocket } from "@/lib/socket";
 import { formatMoney, formatNumber, formatPct } from "@/lib/formatMoney";
 import { curateKpis, buildSectionCharts, type KpiCard, type ChartDef } from "./sectionVisuals";
@@ -258,7 +257,6 @@ function SectionChartCard({ def }: { def: ChartDef }) {
 }
 
 export function AISummary({ section = "overview", title = "AI Executive Summary" }: { section?: string; title?: string } = {}) {
-  useSocketRefresh(["sheets-data"]);
   const canManage = useAuthStore((s) =>
     s.hasPermission("ai_analytics", "manage") || ["SuperAdmin", "Admin", "CEO"].includes(s.user?.role_name || "")
   );
@@ -277,8 +275,17 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [regenMsg, setRegenMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null);
 
-  const fetchSummary = useCallback(async () => {
-    setLoading(true);
+  // showSkeleton is only true for the very first load. A background sync
+  // event (Sheets/MCP/etc. sync every 1-15 min, broadcast to every open
+  // browser) used to call this with the skeleton on every time, blanking
+  // out an already-displayed summary and redrawing it a moment later —
+  // that's the "blinking" this page showed roughly every 1-3 minutes. The
+  // AI summary is cached and only actually changes when someone clicks
+  // Regenerate, so a background refresh only needs to silently swap in
+  // any updated data, never force a visible reload of content already
+  // on screen.
+  const fetchSummary = useCallback(async (showSkeleton: boolean) => {
+    if (showSkeleton) setLoading(true);
     setError(null);
     try {
       const res = await api.fetchRaw(`/ai-analytics/summary?section=${section}`);
@@ -289,14 +296,14 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
       const d = await res.json();
       setData(d);
     } catch (e: any) {
-      setError(e.message);
+      if (showSkeleton) setError(e.message);
     } finally {
-      setLoading(false);
+      if (showSkeleton) setLoading(false);
     }
   }, [section]);
 
   useEffect(() => {
-    fetchSummary();
+    fetchSummary(true);
   }, [fetchSummary]);
 
   useEffect(() => {
@@ -304,7 +311,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
     const socket = getSocket();
     if (!socket) return;
     const handleRefresh = () => {
-      fetchSummary();
+      fetchSummary(false);
     };
     socket.on("data:refresh", handleRefresh);
     return () => {
@@ -376,7 +383,7 @@ export function AISummary({ section = "overview", title = "AI Executive Summary"
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchSummary();
+    await fetchSummary(false);
     setRefreshing(false);
   }, [fetchSummary]);
 

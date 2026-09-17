@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend } from "recharts";
-import { processOpsData, pct, ragColor, formatINR, formatNum, shortStore } from "./types";
+import { processMcpOpsData, pct, ragColor, formatINR, formatNum, shortStore } from "./types";
+import { useMcpOpsReport } from "./useMcpOpsReport";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 
 export function TLWiseTab({ data }: { data: any }) {
   useSocketRefresh(["sheets-data"]);
-  const ops = useMemo(() => processOpsData(data?.ops_data || []), [data]);
+  const { branchBreakdown, tlBreakdown } = useMcpOpsReport();
+  const ops = useMemo(() => processMcpOpsData(branchBreakdown, tlBreakdown), [branchBreakdown, tlBreakdown]);
 
   if (!ops) {
     return <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>No operations data available</div>;
@@ -50,7 +52,7 @@ export function TLWiseTab({ data }: { data: any }) {
               <div style={{ width: "100%", background: "#1f2937", borderRadius: 4, height: 8, overflow: "hidden", marginBottom: 10 }}>
                 <div style={{ height: "100%", borderRadius: 4, width: `${Math.min(p, 100)}%`, background: tl.color }} />
               </div>
-              <div style={{ fontSize: 11, color: "#64748b" }}>Stores: <span style={{ color: "#94a3b8" }}>{tl.stores.map((s) => s.s).join(", ")}</span></div>
+              <div style={{ fontSize: 11, color: "#64748b" }}>Stores: <span style={{ color: "#94a3b8" }}>{tl.stores.map((s: any) => s.s).join(", ")}</span></div>
             </div>
           );
         })}
@@ -101,8 +103,8 @@ export function TLWiseTab({ data }: { data: any }) {
             </tr>
           </thead>
           <tbody>
-            {ops.tlList.map((tl) =>
-              tl.stores.map((s, j) => {
+            {ops.tlList.map((tl: any) =>
+              tl.stores.map((s: any, j: number) => {
                 const p = pct(s.a, s.t);
                 return (
                   <tr key={`${tl.name}-${j}`} style={{ borderBottom: "1px solid #1e2336" }}

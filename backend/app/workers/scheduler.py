@@ -142,6 +142,13 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=600,
+        # Without this, APScheduler's first run is 15 minutes AFTER the
+        # process starts, not immediately — meaning every deploy/migration
+        # (which restarts the backend) left a guaranteed window where the
+        # dashboard kept showing whatever was synced before that restart,
+        # looking like data had "gone wrong" again for no reason. Running
+        # once immediately on every startup closes that window permanently.
+        next_run_time=datetime.now(),
     )
     scheduler.add_job(
         run_insight_engine,
@@ -152,6 +159,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=600,
+        next_run_time=datetime.now(),
     )
     scheduler.start()
     logger.info("Scheduler started (sheet sync: 1min, tele call: 5min, Instagram poll: 15min, MCP sync: 15min, insight engine: 30min)")

@@ -79,53 +79,45 @@ export function isSentinelRow(r: OpsRecord): boolean {
     SENTINEL_STORES.has((r.store || "").trim().toUpperCase());
 }
 
-// Process opsData into TL aggregation and store achievements
-export function processOpsData(opsData: OpsRecord[]) {
-  if (!opsData || opsData.length === 0) return null;
+// Process opsData into TL aggregation and store achievements. Revenue and
+// target come from /sales-reports (MCP, kept fresh by the automatic
+// 15-minute sync) rather than Google Sheets submissions — an earlier
+// Sheets-only version of this silently missed any store's real revenue
+// whenever it had no manual daily Sheets entry on file, which is
+// increasingly common now that MCP drives most revenue. Walk-ins/
+// conversions still ultimately come from Sheets under the hood (the
+// /sales-reports endpoint already blends that in per store for India).
+const TL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#06b6d4", "#f97316"];
 
-  // Group by store
-  const storeMap: Record<string, { revenue: number; target: number; walkins: number; sales: number; tl: string }> = {};
-  for (const r of opsData) {
-    if (isSentinelRow(r)) continue;
-    const key = r.store;
-    if (!storeMap[key]) storeMap[key] = { revenue: 0, target: 0, walkins: 0, sales: 0, tl: r.tl };
-    storeMap[key].revenue += r.revenue || 0;
-    storeMap[key].target += r.monthly_target || 0;
-    storeMap[key].walkins += r.walk_ins || 0;
-    storeMap[key].sales += r.walk_in_conversions || 0;
-    storeMap[key].tl = r.tl;
+export function processMcpOpsData(branchBreakdown: any[], tlBreakdown: any[]) {
+  if (!branchBreakdown || branchBreakdown.length === 0) return null;
+
+  const storeToTl: Record<string, string> = {};
+  for (const t of tlBreakdown || []) {
+    for (const storeName of t.stores || []) storeToTl[storeName] = t.key;
   }
 
-  const storeAchievements = Object.entries(storeMap).map(([store, d]) => ({
-    store, tl: d.tl, mtd: d.revenue, target: d.target,
-    achPct: pct(d.revenue, d.target), walkins: d.walkins, sales: d.sales,
-    convPct: d.walkins > 0 ? Math.round((d.sales / d.walkins) * 100) : 0,
+  const storeAchievements = branchBreakdown.map((b) => ({
+    store: b.key, tl: storeToTl[b.key] || "Unassigned", mtd: b.revenue, target: b.target,
+    achPct: b.achievement_pct, walkins: b.walkins, sales: b.conversions,
+    convPct: b.walkins > 0 ? Math.round((b.conversions / b.walkins) * 100) : 0,
   })).sort((a, b) => b.achPct - a.achPct);
 
-  // TL aggregation
-  const tlMap: Record<string, { target: number; achieved: number; walkins: number; conv: number; stores: { s: string; t: number; a: number; wi: number; cv: number; cp: number }[] }> = {};
-  for (const sa of storeAchievements) {
-    const tl = sa.tl;
-    if (!tlMap[tl]) tlMap[tl] = { target: 0, achieved: 0, walkins: 0, conv: 0, stores: [] };
-    tlMap[tl].target += sa.target;
-    tlMap[tl].achieved += sa.mtd;
-    tlMap[tl].walkins += sa.walkins;
-    tlMap[tl].conv += sa.sales;
-    tlMap[tl].stores.push({ s: sa.store, t: sa.target, a: sa.mtd, wi: sa.walkins, cv: sa.sales, cp: sa.convPct });
-  }
-
-  const TL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#06b6d4", "#f97316"];
-  const tlList = Object.entries(tlMap).map(([name, d], i) => ({
-    name, ...d,
-    achPct: pct(d.achieved, d.target),
-    convPct: d.walkins > 0 ? Math.round((d.conv / d.walkins) * 100) : 0,
+  const tlList = (tlBreakdown || []).map((t, i) => ({
+    name: t.key, target: t.target, achieved: t.revenue, walkins: t.walkins, conv: t.conversions,
+    achPct: t.achievement_pct,
+    convPct: t.walkins > 0 ? Math.round((t.conversions / t.walkins) * 100) : 0,
     color: TL_COLORS[i % TL_COLORS.length],
+    stores: (t.stores || []).map((s: string) => {
+      const sa = storeAchievements.find((x) => x.store === s);
+      return { s, t: sa?.target || 0, a: sa?.mtd || 0, wi: sa?.walkins || 0, cv: sa?.sales || 0, cp: sa?.convPct || 0 };
+    }),
   })).sort((a, b) => b.achPct - a.achPct);
 
-  const totalRevenue = storeAchievements.reduce((s, sa) => s + sa.mtd, 0);
-  const totalTarget = storeAchievements.reduce((s, sa) => s + sa.target, 0);
-  const totalWalkins = storeAchievements.reduce((s, sa) => s + sa.walkins, 0);
-  const totalConversions = storeAchievements.reduce((s, sa) => s + sa.sales, 0);
+  const totalRevenue = branchBreakdown.reduce((s, b) => s + b.revenue, 0);
+  const totalTarget = branchBreakdown.reduce((s, b) => s + b.target, 0);
+  const totalWalkins = branchBreakdown.reduce((s, b) => s + b.walkins, 0);
+  const totalConversions = branchBreakdown.reduce((s, b) => s + b.conversions, 0);
 
   const rag = { green: 0, amber: 0, red: 0 };
   for (const sa of storeAchievements) {

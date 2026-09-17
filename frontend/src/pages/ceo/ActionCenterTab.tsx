@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { processOpsData, formatINR, ragColor } from "./types";
+import { processMcpOpsData, formatINR, ragColor } from "./types";
+import { useMcpOpsReport } from "./useMcpOpsReport";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 import { api } from "@/lib/apiClient";
 
@@ -42,16 +43,15 @@ function ActionTable({ items, color }: { items: any[]; color: string }) {
 
 export function ActionCenterTab({ data }: { data: any }) {
   useSocketRefresh(["sheets-data"]);
-  const opsData = data?.ops_data || [];
   const reviews = data?.reviews || [];
   const staff = data?.staff || [];
   const intlStaff = data?.intl_staff || [];
 
   // Auto-detected insights (revenue pace vs target, week-over-week drops,
   // funnel-rate drops) computed from real MCP/Sheets data by
-  // insight_engine.py — see StrategicInsight.source == "auto". These are
-  // separate from the hardcoded checks below, which only ever look at the
-  // current Sheets ops_data snapshot and can't see MCP-only branches.
+  // insight_engine.py — see StrategicInsight.source == "auto". These
+  // supplement the hardcoded checks below (both now read the same
+  // MCP-backed ops data, via useMcpOpsReport/processMcpOpsData).
   const [autoInsights, setAutoInsights] = useState<{ critical: any[]; high: any[]; strategic: any[] }>({ critical: [], high: [], strategic: [] });
   // Feedback loop (see insight_engine.py get_insight_stats): how many
   // auto-detected issues actually got resolved this month, and how fast —
@@ -70,7 +70,8 @@ export function ActionCenterTab({ data }: { data: any }) {
   }, []);
   const toItem = (i: any) => ({ area: i.title, issue: i.description, assign: i.assigned_to || "Unassigned", action: i.action, auto: true });
 
-  const ops = useMemo(() => processOpsData(opsData), [opsData]);
+  const { branchBreakdown, tlBreakdown } = useMcpOpsReport();
+  const ops = useMemo(() => processMcpOpsData(branchBreakdown, tlBreakdown), [branchBreakdown, tlBreakdown]);
 
   const validReviews = useMemo(() => {
     return reviews.filter((r: any) => r.store && r.store !== "store" && typeof r.rating === "number");
@@ -176,7 +177,7 @@ export function ActionCenterTab({ data }: { data: any }) {
   return (
     <div>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#93c5fd", marginBottom: 14, paddingBottom: 6, borderBottom: "1px solid #2d3748" }}>
-        Action Center - Derived from Live Sheet Data + Auto-Detected Insights
+        Action Center - Derived from MCP Sales Data + Auto-Detected Insights
       </div>
 
       {insightStats && insightStats.total_raised > 0 && (

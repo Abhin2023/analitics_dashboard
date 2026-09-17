@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend } from "recharts";
-import { processOpsData, pct, ragColor, ragBg, formatINR, formatNum, shortStore } from "./types";
+import { processMcpOpsData, pct, ragColor, ragBg, formatINR, formatNum, shortStore } from "./types";
+import { useMcpOpsReport } from "./useMcpOpsReport";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 
 export function DailyOpsTab({ data }: { data: any }) {
   useSocketRefresh(["sheets-data"]);
-  const ops = useMemo(() => processOpsData(data?.ops_data || []), [data]);
+  const { branchBreakdown, tlBreakdown } = useMcpOpsReport();
+  const ops = useMemo(() => processMcpOpsData(branchBreakdown, tlBreakdown), [branchBreakdown, tlBreakdown]);
 
   if (!ops) {
     return <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}>No operations data available</div>;

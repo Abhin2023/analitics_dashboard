@@ -3,12 +3,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { processOpsData, pct, ragColor, formatINR, formatNum, shortStore } from "./types";
+import { processMcpOpsData, pct, ragColor, formatINR, formatNum, shortStore } from "./types";
+import { useMcpOpsReport } from "./useMcpOpsReport";
 import { useSocketRefresh } from "../../hooks/useSocketRefresh";
 
 export function OverviewTab({ data }: { data: any }) {
   useSocketRefresh(["sheets-data"]);
-  const ops = useMemo(() => processOpsData(data?.ops_data || []), [data]);
+  const { branchBreakdown, tlBreakdown } = useMcpOpsReport();
+  const ops = useMemo(() => processMcpOpsData(branchBreakdown, tlBreakdown), [branchBreakdown, tlBreakdown]);
   const staff = data?.staff || [];
   const intlStaff = data?.intl_staff || [];
   const reviews = data?.reviews || [];
