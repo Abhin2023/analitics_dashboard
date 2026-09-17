@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { Phone, Copy, Check } from "lucide-react";
 
+// Some source rows have a stray letter stuck onto the number (e.g. a
+// data-entry/export artifact like "p+919845012345"), which a dialer can't
+// handle at all. Strips everything except digits and a single leading "+"
+// so what reaches the dialer, the display, and the clipboard is always a
+// clean, dialable number.
+function sanitizePhone(phone: string): string {
+  const hasPlus = phone.includes("+");
+  const digits = phone.replace(/\D/g, "");
+  return (hasPlus ? "+" : "") + digits;
+}
+
 // A phone number with a copy button and a call button, reused everywhere
 // a lead's number is shown (Telecaller Dashboard, Manage Leads, Lead
 // Detail). The call button is a plain tel: link — the only way a web page
@@ -19,12 +30,14 @@ export function PhoneActions({
   const [copied, setCopied] = useState(false);
 
   if (!phone) return null;
+  const clean = sanitizePhone(phone);
+  if (!clean.replace("+", "")) return <span className={`text-xs text-[var(--text-muted)] ${className}`}>{phone}</span>;
 
   const copy = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(phone);
+      await navigator.clipboard.writeText(clean);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -40,15 +53,15 @@ export function PhoneActions({
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
       <a
-        href={`tel:${phone}`}
+        href={`tel:${clean}`}
         onClick={(e) => e.stopPropagation()}
         className={`inline-flex items-center gap-1 ${textSize} text-[var(--accent-blue)] hover:underline font-mono`}
         title="Call this number"
       >
-        {phone}
+        {clean}
       </a>
       <a
-        href={`tel:${phone}`}
+        href={`tel:${clean}`}
         onClick={(e) => e.stopPropagation()}
         className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/15 shrink-0"
         title="Call"
