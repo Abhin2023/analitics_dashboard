@@ -87,7 +87,7 @@ class SheetSyncService:
                         continue
                     user = await self._get_or_create_tl(db, tl_name, tl_role.id)
                     store = await self._get_or_create_store(db, store_name, user.id)
-                    if r.get("monthly_target") is not None:
+                    if r.get("monthly_target") is not None and not await self._is_mcp_managed_target(db, store.id):
                         store.monthly_target = r["monthly_target"]
                     if r.get("breakeven_rev") is not None:
                         store.breakeven_revenue = r["breakeven_rev"]
@@ -118,7 +118,7 @@ class SheetSyncService:
                     if store:
                         if r.get("daily_target") is not None:
                             store.daily_target = r["daily_target"]
-                        if r.get("monthly_target") is not None:
+                        if r.get("monthly_target") is not None and not await self._is_mcp_managed_target(db, store.id):
                             store.monthly_target = r["monthly_target"]
                         v2_rows += 1
                 await db.commit()
@@ -376,6 +376,22 @@ class SheetSyncService:
                 db.add(user)
                 await db.flush()
         return user
+
+    async def _is_mcp_managed_target(self, db: AsyncSession, store_id: int) -> bool:
+        """True once a store has any MCP alias — meaning the automatic MCP
+        sync (every 15 min, see mcp_sync_service.sync_mcp_sales) is already
+        keeping its monthly_target current from MCP's own live target
+        sheet. Letting this Sheets sync also write monthly_target for such
+        a store created a race: this sync runs every 1 minute vs MCP's 15,
+        so a stale/unmaintained manual figure in the Sheet would overwrite
+        the correct MCP-derived target within a minute of every correction,
+        making the dashboard's target look "randomly wrong again" days
+        after it had been fixed. monthly_target now has exactly one
+        authoritative source per store — MCP once aliased, this Sheet only
+        for the store's other fields and for stores MCP doesn't track."""
+        return (await db.execute(
+            select(StoreMcpAlias.id).where(StoreMcpAlias.store_id == store_id).limit(1)
+        )).scalar_one_or_none() is not None
 
     async def _get_or_create_store(self, db: AsyncSession, name: str, tl_user_id: int) -> Store:
         result = await db.execute(select(Store).where(Store.name == name))
