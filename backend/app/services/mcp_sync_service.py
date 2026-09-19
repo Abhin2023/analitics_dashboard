@@ -329,12 +329,32 @@ async def sync_mcp_sales(
     # conversion using current rates) so the International Sales chart can
     # read a stored value instead of calling MCP on every dashboard load —
     # same principle as everything else above, just for this one view.
+    #
+    # Every country in MCP_COUNTRIES is written every run, not just the
+    # ones MCP's comparison happens to mention this time — a country that
+    # genuinely has no sales this month is written as an explicit zero.
+    # Only upserting rows for countries present in `comparison` (the old
+    # behavior) meant a country that drops out of MCP's comparison (e.g.
+    # Malaysia, Bahrain, UK having no sales this month) kept showing
+    # whatever number was last recorded, possibly weeks old, forever —
+    # since nothing ever cleared it.
+    _CURRENCY_BY_COUNTRY = {
+        "INDIA": "INR", "OMAN": "OMR", "PAKISTAN": "PKR", "UAE": "AED",
+        "MALAYSIA": "MYR", "UK": "GBP", "BAHRAIN": "BHD", "QATAR": "QAR",
+    }
     try:
         comparison = await get_country_comparison(from_date, to_date)
-        for c in comparison:
+        comparison_by_country = {c["country"].upper(): c for c in comparison}
+        for mcp_country in MCP_COUNTRIES:
+            key = mcp_country["name"].upper()
+            c = comparison_by_country.get(key)
+            if c:
+                local_amount, local_currency, usd_amount = c["local_amount"], c["local_currency"], c["usd_amount"]
+            else:
+                local_amount, local_currency, usd_amount = 0.0, _CURRENCY_BY_COUNTRY.get(key, ""), 0.0
             stmt = mysql_insert(CountrySalesSnapshot).values(
-                country=c["country"], local_amount=c["local_amount"],
-                local_currency=c["local_currency"], usd_amount=c["usd_amount"],
+                country=key, local_amount=local_amount,
+                local_currency=local_currency, usd_amount=usd_amount,
                 synced_at=datetime.utcnow(),
             )
             stmt = stmt.on_duplicate_key_update(

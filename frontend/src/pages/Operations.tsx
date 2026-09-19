@@ -52,9 +52,15 @@ export default function Operations() {
     const to = localDateStr(now);
     if (period === "custom" && customRange) return customRange;
     if (period === "1day") return { from: to, to };
-    const from = new Date(now);
-    if (period === "7day") from.setDate(from.getDate() - 6);
-    else from.setMonth(from.getMonth() - 1); // "month": rolling 30 days
+    if (period === "7day") {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 6);
+      return { from: localDateStr(from), to };
+    }
+    // "month": calendar month to date (1st of the current month through
+    // today), not a rolling 30 days — matches how "monthly" is understood
+    // everywhere else (MCP's own target sheets, International Sales).
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
     return { from: localDateStr(from), to };
   }, [period, customRange]);
 

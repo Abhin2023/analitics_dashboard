@@ -134,11 +134,19 @@ export default function Dashboard() {
     const to = localDateStr(now);
     if (period === "custom" && customRange) return customRange;
     if (period === "1day") return { from: to, to }; // today only
+    if (period === "month") {
+      // Calendar month to date (1st of the current month through today),
+      // not a rolling 30 days — matches how "monthly" is understood
+      // everywhere else (MCP's own target sheets, International Sales),
+      // so this card and that chart cover the exact same window instead
+      // of silently comparing two different date ranges.
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: localDateStr(from), to };
+    }
     const from = new Date(now);
     if (period === "7day") from.setDate(from.getDate() - 6);
     else if (period === "6month") from.setMonth(from.getMonth() - 6);
     else if (period === "1year") from.setFullYear(from.getFullYear() - 1);
-    else from.setMonth(from.getMonth() - 1); // "month" default: rolling 30 days
     return { from: localDateStr(from), to };
   }, [period, customRange]);
 
